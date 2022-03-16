@@ -288,3 +288,47 @@ Java NIO 提供 Selector 实现单个线程管理多个channel的功能。
 
 ## 泛型实现
 泛型是通过`类型擦除`来实现的，编译器在编译时擦除了所有类型相关的信息，所以在运行时不存在任何类型相关的信息List\<String>不能转为List\<Object>，因为泛型的类型不一样，这种转换只能在`子类与父类`之间转换，虽然Object是String的父类，但是List\<Object>和List\<String>在编译器看来，是两种完全不同的东西
+
+## Lambda
+一个接口如果只包含`一个`抽象方法，那么它就是一个`函数式接口`
+对于`函数式接口`，可以使用**lambda表达式**创建该接口的`对象`
+```java
+public Interface Test{
+    abstract void doTest(int a);
+}
+
+Test test = (a)->{
+    System.out.println("do test: " + a);
+};
+
+test.doTest(10);
+```
+
+## 元注解
+元注解负责注解其他注解
+**@Target:** 用于描述注解的使用范围
+**@Retention:** 表示需要在什么级别保存该注解信息，用于描述注解的生命周期
+**@Document:** 说明该注解将被包含在javadoc中
+**@Inherited:** 说明子类可以继承父类的该注解
+```java
+public class Test{
+    @MyAnnotation(name = "aaa", schools={"a","b"})
+    public void test{
+
+    }
+}
+
+@Target(value = {ElementType.METHOD, ElementType.TYPE})
+@Retention(value = RetentionPolicy.RUNTIME)
+@Documented
+@Inherited
+public @interface MyAnnotation{
+    // 注解参数：参数类型 + 参数名();
+    String name() default "";
+    int age() default 0;
+    String[] schools();
+    // 注解参数只有一个value的时候，使用时可以省略
+    String value();
+}
+```
+
