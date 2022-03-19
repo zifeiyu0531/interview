@@ -16,3 +16,13 @@ ClassLoader classLoader = Class.forName("xxx.xxx.xxx").getClassLoader();
 class.getFields(); // 获取public属性
 class.getDeclaredFields(); // 获取全部属性
 ```
+
+```java
+// 根据xml获取上下文信息
+ApplicationContext context = new ClassPathXmlApplicationContext("beans.xml");
+Object obj = context.getBean("objname")
+```
+
+```sql
+insert into tablename (id) values (#{id}) #{}防止sql注入
+```
