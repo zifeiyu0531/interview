@@ -1,6 +1,6 @@
 ## Spring的IoC
 XML解析 + 工厂模式 + 反射
-1. IoC（Inversion of Control）是指`容器控制`程序对象之间的关系，而不是传统实现中，由`程序代码`直接操控。控制权由应用代码中转到了外部容器，控制权的转移就是是所谓`控制反转`。对于Spring而言，就是由Spring来控制对象的生命周期和对象之间的关系；IoC的实现方式是`依赖注入（DI）`。从名字上理解，所谓依赖注入，即组件之间的依赖关系由容器在`运行期`决定，即由容器动态地将某种依赖关系注入到组件之中
+1. IoC（Inversion of Control）是指`容器控制`程序对象之间的关系，而不是传统实现中，由`程序代码`直接操控。控制权由应用代码中转到了外部容器(第三方)，控制权的转移就是是所谓`控制反转`。对于Spring而言，就是由Spring来控制对象的生命周期和对象 之间的关系；IoC的实现方式是`依赖注入（DI）`。从名字上理解，所谓依赖注入，即组件之间的依赖关系由容器在`运行期`决定，即由容器动态地将某种依赖关系注入到组件之中
 2. 在Spring的工作方式中，所有的类都会在spring容器中`登记`，告诉Spring这是个什么东西，你需要什么东西，然后Spring会在系统运行到适当的时候，把你要的东西主动给你，同时也把你交给其他需要你的东西。所有的类的`创建、销毁`都由Spring来控制，也就是说控制对象生存周期的不再是引用它的对象，而是Spring。对于某个具体的对象而言，以前是它控制其他对象，现在是所有对象都被Spring控制，所以这叫控制反转
 3. 在系统运行中，动态的向某个对象提供它所需要的其他对象
 4. `依赖注入`的思想是通过`反射`机制实现的，在实例化一个类时，它通过反射调用类中`set`方法将事先保存在`HashMap`中的类属性注入到类中。 总而言之，在传统的对象创建方式中，通常由调用者来创建被调用者的实例，而在Spring中创建被调用者的工作由`Spring`来完成，然后`注入`调用者，即所谓的依赖注入or控制反转。 注入方式有两种：依赖注入和设置注入
@@ -34,7 +34,7 @@ Spring中的AOP有6种增强方式，分别是：`Before` 前置增强、`After`
 1. **JoinPoint**（连接点）：程序执行过程中的一个点，如方法的执行或异常的处理。在Spring AOP中，连接点总是表示`方法的执行`。通俗的讲，连接点即表示类里面可以被增强的`方法`
 2. **PointCut**（切入点）：是与连接点匹配的不同类型的表达，Spring框架使用AspectJ表达切入点。可以将切入点理解为`需要被拦截的JoinPoint`
 3. **Advice**（通知）：所谓通知是指拦截到JoinPoint之后所要做的事情就是通知，通知分为前置通知、后置通知、异常通知、最终通知和环绕通知(切面要完成的`功能`)
-4. **Aspect**（切面）：Aspect切面表示`PointCut`（切入点）和`Advice`（通知）的结合
+4. **Aspect**（切面）：Aspect切面表示`PointCut`（切入点）和`Advice`（通知）的结合，在spring中它是一个类
 
 #### 实现原理
 **动态代理**
@@ -44,7 +44,9 @@ Spring中的AOP有6种增强方式，分别是：`Before` 前置增强、`After`
 3. 代理角色     -- 调用真实角色实现操作、附加操作
 4. 客户         -- 访问代理角色
 
-`Java`动态代理： 利用`反射`机制生成一个实现代理接口的`匿名类`，在调用具体方法前调用InvokeHandler来处理
+`Java`动态代理： 利用`反射`机制生成一个实现代理接口的`匿名类`，`Proxy`提供了创建动态代理类和实例的静态方法，在调用具体方法前调用`InvocationHandler`来处理
+**Proxy:** 创建代理实例
+**InvocationHandler:** 调用处理程序并返回结果
 `cglib`动态代理： 利用`asm`开源包，对代理对象类的class文件加载进来，通过`修改其字节码`生成子类来处理
 ```java
 public class ProxyInvocationHandler implements InvocationHandler{
@@ -57,7 +59,7 @@ public class ProxyInvocationHandler implements InvocationHandler{
 
     // 生成得到的代理类
     public Object getProxy(){
-        return Proxy.newProxyInstance(this.getClass(), target.getClass().getInterfaces, this);
+        return Proxy.newProxyInstance(this.getClass().getClassLoader(), target.getClass().getInterfaces, this);
     }
 
     // 处理代理实例，并返回结果
@@ -147,11 +149,9 @@ public class AnnotationPointcut {
     @Around("execution(* com.kuang.service.UserServiceImpl.*(..))")
     public void around(ProceedingJoinPoint jp) throws Throwable {
         System.out.println("环绕前");
-        System.out.println("签名:"+jp.getSignature());
         //执行目标方法proceed
         Object proceed = jp.proceed();
         System.out.println("环绕后");
-        System.out.println(proceed);
     }
 }
 ```
@@ -159,6 +159,7 @@ public class AnnotationPointcut {
 ```xml
 <!--第三种方式:注解实现-->
 <bean id="annotationPointcut" class="com.kuang.config.AnnotationPointcut"/>
+<!--开启注解支持-->
 <aop:aspectj-autoproxy/>
 ```
 
@@ -311,3 +312,25 @@ String name;
 4. service方法执行，向代表响应的`response`对象中`写入`将要回送给浏览器的数据
 5. `服务器`从response对象中取出相应的数据，构建一个`http响应`，回写给客户机浏览器
 6. 浏览器接受响应数据，解析数据进行显示
+
+## Spring-Mybatis事务管理
+**声明式事务**
+AOP
+```xml
+<!-- 开启事务管理 -->
+<bean id="transactionManager" class="org.springframework.jdbc.datasource.DataSourceTransactionManager">
+  <constructor-arg ref="dataSource" />
+</bean>
+```
+**编程式事务**
+代码侵入
+```java
+TransactionStatus status = transactionManager.getTransaction(new DefaultTransactionDefinition());
+try{
+    userMapper.insertUser(user);
+}catch(Exception e){
+    transaction.rollback(status);
+    throw e;
+}
+transactionManager.commit(status);
+```
