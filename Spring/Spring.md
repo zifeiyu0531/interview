@@ -334,3 +334,100 @@ try{
 }
 transactionManager.commit(status);
 ```
+
+## SpringMVC
+Spring的web框架围绕`DispatcherServlet`设计，DispatcherServlet是一个前置控制器，作用是将请求分发到不同的处理器
+![](./pic/mvc.png)
+```xml
+<web-app ...>
+   <!--1.注册DispatcherServlet-->
+   <servlet>
+       <servlet-name>springmvc</servlet-name>
+       <servlet-class>org.springframework.web.servlet.DispatcherServlet</servlet-class>
+       <!--关联一个springmvc的配置文件:【servlet-name】-servlet.xml-->
+       <init-param>
+           <param-name>contextConfigLocation</param-name>
+           <param-value>classpath:springmvc-servlet.xml</param-value>
+       </init-param>
+       <!--启动级别-1-->
+       <load-on-startup>1</load-on-startup>
+   </servlet>
+ 
+   <!--/ 匹配所有的请求；（不包括.jsp）-->
+   <!--/* 匹配所有的请求；（包括.jsp）-->
+   <servlet-mapping>
+       <servlet-name>springmvc</servlet-name>
+       <url-pattern>/</url-pattern>
+   </servlet-mapping>
+</web-app>
+```
+**接口模式**
+```xml
+<beans ...>
+    <!-- 处理器映射器 -->
+    <bean class="org.springframework.web.servlet.handler.BeanNameUrlHandlerMapping"/>
+    <!-- 处理器适配器 -->
+    <bean class="org.springframework.web.servlet.mvc.SimpleControllerHandlerAdapter"/>
+
+    <!--视图解析器:DispatcherServlet给他的ModelAndView-->
+    <bean class="org.springframework.web.servlet.view.InternalResourceViewResolver" id="InternalResourceViewResolver">
+        <!--前缀-->
+        <property name="prefix" value="/WEB-INF/jsp/"/>
+        <!--后缀-->
+        <property name="suffix" value=".jsp"/>
+    </bean>
+
+    <!--BeanNameUrlHandlerMapping:Bean-->
+    <bean id="/hello" class="com.kuang.controller.HelloController"/>
+</beans>
+```
+**注解模式**
+```xml
+<beans ...>
+    <!-- 自动扫描包，让指定包下的注解生效,由IOC容器统一管理 -->
+    <context:component-scan base-package="com.kuang.controller"/>
+    <!-- 让Spring MVC不处理静态资源 -->
+    <mvc:default-servlet-handler />
+    <!-- 注解模式 -->
+    <mvc:annotation-driven />
+
+    <!-- 视图解析器 -->
+    <bean class="org.springframework.web.servlet.view.InternalResourceViewResolver" id="internalResourceViewResolver">
+        <!-- 前缀 -->
+        <property name="prefix" value="/WEB-INF/jsp/" />
+        <!-- 后缀 -->
+        <property name="suffix" value=".jsp" />
+    </bean>
+</beans>
+```
+#### SpringMVC执行原理
+![](./pic/mvc2.png)
+1. 用户发出请求，`DispatcherServlet`接收请求并拦截请求。
+2. `HandlerMapping`为处理器映射。DispatcherServlet调用HandlerMapping,HandlerMapping根据请求url查找Handler。
+3. `HandlerExecution`表示具体的Handler,其主要作用是根据url查找控制器，如上url被查找控制器为：hello。
+4. HandlerExecution将解析后的信息传递给DispatcherServlet,如解析控制器映射等。
+5. `HandlerAdapter`表示处理器适配器，其按照特定的规则去执行Handler。
+6. Handler让具体的`Controller`执行。
+7. Controller将具体的执行信息返回给HandlerAdapter,如`ModelAndView`。
+8. HandlerAdapter将视图逻辑名或模型传递给DispatcherServlet。
+9. DispatcherServlet调用视图解析器(`ViewResolver`)来解析HandlerAdapter传递的逻辑视图名。
+10. 视图解析器将解析的逻辑视图传给DispatcherServlet。
+11. DispatcherServlet根据视图解析器解析的视图结果，调用具体的`视图`。
+12. 最终视图呈现给用户。
+
+## @PathVariable
+在Spring MVC中可以使用`@PathVariable`注解，让`方法参数`的值对应绑定到一个`URI模板变量`上
+```java
+@Controller
+public class RestFulController {
+    //映射访问路径
+    @RequestMapping("/commit/{p1}/{p2}")
+    public String index(@PathVariable int p1, @PathVariable int p2, Model model){
+        int result = p1+p2;
+        //Spring MVC会自动实例化一个Model对象用于向视图中传值
+        model.addAttribute("msg", "结果："+result);
+        //返回视图位置
+        return "test";
+    }
+}
+```
