@@ -431,3 +431,66 @@ public class RestFulController {
     }
 }
 ```
+
+## SpringBoot自动配置
+pom.xml
+* `spring-boot-dependencies`: 核心依赖，在父工程中
+* `spring-boot-starter`: 启动器，springboot将功能场景封装成一个个启动器，如`spring-boot-starter-web`、`spring-boot-starter-test`
+#### @SpringBootApplication
+标注在某个类上说明这个类是SpringBoot的主启动类
+```java
+@SpringBootApplication
+public class SpringbootApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SpringbootApplication.class, args);
+    }
+}
+```
+```java
+@SpringBootConfiguration
+@EnableAutoConfiguration
+@ComponentScan(
+    excludeFilters = {@Filter(
+    type = FilterType.CUSTOM,
+    classes = {TypeExcludeFilter.class}
+), @Filter(
+    type = FilterType.CUSTOM,
+    classes = {AutoConfigurationExcludeFilter.class}
+)}
+)
+public @interface SpringBootApplication {
+    // ......
+}
+```
+#### @ComponentScan
+Spring中的组件，用于自动扫描并加载符合条件的`组件`或者`bean` ， 将这个bean定义加载到`IOC`容器中
+#### @SpringBootConfiguration
+标注在某个类上 ， 表示这是一个SpringBoot的配置类
+```java
+@Configuration
+public @interface SpringBootConfiguration {}
+
+@Component
+public @interface Configuration {}
+```
+**@Configuration** 说明这是一个`配置类` ，配置类就是对应Spring的`xml`配置文件
+#### @EnableAutoConfiguration
+开启自动配置功能
+```java
+@AutoConfigurationPackage
+@Import({AutoConfigurationImportSelector.class})
+public @interface EnableAutoConfiguration {
+    // ...
+}
+```
+```java
+@Import({Registrar.class})
+public @interface AutoConfigurationPackage {
+}
+```
+**@AutoConfigurationPackage** 自动配置包
+**@import** Spring底层注解，给容器中导入一个`组件`
+* `Registrar.class`：将主启动类的所在包及包下面所有子包里面的所有`组件`扫描到Spring容器；
+* `AutoConfigurationImportSelector.class`：自动配置导入选择器
+#### AutoConfigurationImportSelector
+
