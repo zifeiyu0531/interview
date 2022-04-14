@@ -228,3 +228,18 @@ public String[] selectImports(AnnotationMetadata annotationMetadata) {
    - 用户去看这个组件是获取的`配置文件`的什么值，就在自己项目的配置文件中去定义对应的值
 
 ## 最佳实践
+- 引入相关场景依赖
+- 查看有哪些自动配置（配置文件中定义`debug=true`），是否需要修改
+#### Lombok
+简化`java bean`开发
+```xml
+<dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+</dependency>
+```
+- `@Data`生成getter setter
+- `@ToString`生成toString方法
+- `@AllargsConstructor`生成有参构造器
+- `@NoArgsConstructor`生成无参构造器
+- `@EqualsAndHashCode`重新Equals和hashCode方法
