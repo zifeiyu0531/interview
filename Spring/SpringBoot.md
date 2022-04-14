@@ -227,6 +227,50 @@ public String[] selectImports(AnnotationMetadata annotationMetadata) {
    - 用户自己使用`@Bean`替换底层组件
    - 用户去看这个组件是获取的`配置文件`的什么值，就在自己项目的配置文件中去定义对应的值
 
+## SpringBoot Web开发
+#### SpringMVC自动配置
+Spring MVC自动配置类：`WebMvcAutoConfiguration`
+```java
+@Configuration(proxyBeanMethods = false)
+@Import(EnableWebMvcConfiguration.class)
+@EnableConfigurationProperties({ WebMvcProperties.class, WebProperties.class })
+public static class WebMvcAutoConfigurationAdapter implements WebMvcConfigurer, ServletContextAware {}
+```
+`WebMvcProperties == "spring.mvc"`
+`WebProperties == "spring.web"`
+
+#### 静态资源访问
+将静态资源放在类路径下的`/static` `/public` `/resources` `/META-INF/resources`目录，访问时使用当前项目`根路径/ + 静态资源名 `
+原理：静态映射默认拦截了所有请求`/**`
+- `spring.web.resources.add-mappings=false` ：禁用静态资源访问
+- `spring.mvc.static-path-pattern=/xxx/**` ： 修改访问静态资源时请求的前缀
+- `spring.web.resources.static-locations=[classpath:/xxx/]` ：修改静态资源存放的路径
+
+- 一个请求进来先找`Controller`能不能处理，如果不能处理再交给`静态资源`处理器
+
+在`WebMvcAutoConfiguration`中
+```java
+public void addResourceHandlers(ResourceHandlerRegistry registry) {
+    // 是否禁用静态资源
+    if (!this.resourceProperties.isAddMappings()) {
+        logger.debug("Default resource handling disabled");
+        return;
+    }
+    // 将/webjars/**请求映射到classpath:/META-INF/resources/webjars/
+    addResourceHandler(registry, "/webjars/**", "classpath:/META-INF/resources/webjars/");
+    // 获取spring.mvc.static-path-pattern，默认值是/**
+    addResourceHandler(registry, this.mvcProperties.getStaticPathPattern(), (registration) -> {
+        // 获取spring.web.resources.static-locations
+        registration.addResourceLocations(this.resourceProperties.getStaticLocations());
+        if (this.servletContext != null) {
+            ServletContextResource resource = new ServletContextResource(this.servletContext, SERVLET_LOCATION);
+            registration.addResourceLocations(resource);
+        }
+    });
+}
+```
+
+
 ## 最佳实践
 - 引入相关场景依赖
 - 查看有哪些自动配置（配置文件中定义`debug=true`），是否需要修改
@@ -243,3 +287,50 @@ public String[] selectImports(AnnotationMetadata annotationMetadata) {
 - `@AllargsConstructor`生成有参构造器
 - `@NoArgsConstructor`生成无参构造器
 - `@EqualsAndHashCode`重新Equals和hashCode方法
+- `Slf4j`注入日志类，`"log.info()"`
+#### dev tools
+热部署
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-devtools</artifactId>
+    <optional>true</optional>
+</dependency>
+```
+#### Spring Initializr
+idea 快速创建
+#### yaml
+除了默认在`resources`目录下的`application.properties`文件，还可以使用`yaml`文件，使用`@ConfigurationProperties(prefix = "xxx")`和文件内的指定前缀相绑定，`properties`文件优先级比`yaml`高
+- `key: value` kv之间有空格，大小写敏感
+- 使用`缩进`表示层级关系
+- 字符串无需加引号，如果要加，`'\n'`会将\n作为字符串输出、`"\n"`会将\n作为换行符输出
+
+**对象**
+```yaml
+# 行内写法
+k: {k1: v1, k2: v2, k3: v3}
+# 一般写法
+k:
+  k1: v1
+  k2: v2
+  k3: v3
+```
+**数组**
+```yaml
+# 行内写法
+k: [v1, v2, v3]
+# 一般写法
+k:
+  - v1
+  - v2
+  - v3
+```
+#### 配置提示
+导入`configuration-processor`编写配置文件绑定自定义类的时候会有提示
+```xml
+<dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-configuration-processor</artifactId>
+    <optional>true</optional>
+</dependency>
+```
