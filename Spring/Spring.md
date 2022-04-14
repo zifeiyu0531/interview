@@ -28,6 +28,224 @@ public static Dic getDic(){
 \<Bean>：		写在XML中
 @Component：    组件，放在类上，说明类被Spring管理了
 
+## Spring 扩展原理
+#### BeanFactoryPostProcessor
+**BeanPostProcessor** Bean后置处理器，Bean创建对象初始化前后工作
+**BeanFactoryPostProcessor** BeanFactory后置处理器，BeanFactory标准初始化之后调用(`postProcessBeanFactory`)：所有的Bean定义`已经`加载，但Bean`实例`还未创建
+在`invokeBeanFactoryPostProcessors(beanFactory)`方法执行
+如何找到所有的`BeanFactoryPostProcessor`并执行它们的方法：
+```java
+String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanFactoryPostProcessor.class, true, false);
+for (String ppName : postProcessorNames) {
+    //在BeanFactory中找到所有类型是BeanFactoryPostProcessor的组件
+    beanFactory.getBean(ppName, BeanFactoryPostProcessor.class);
+    //...
+}
+```
+#### BeanDefinitionRegistryPostProcessor
+`BeanDefinitionRegistryPostProcessor`是`BeanFactoryPostProcessor`的子接口
+在所有的Bean定义`将要`加载，但Bean`实例`还未创建时调用(`postProcessBeanDefinitionRegistry`)，先于`BeanFactoryPostProcessor`执行
+`BeanDefinitionRegistry`是Bean的定义信息的保存中心，之后`BeanFactory`就是按照`BeanDefinitionRegistry`中保存的每一个Bean定义信息创建Bean实例
+在`invokeBeanFactoryPostProcessors(beanFactory)`方法执行
+如何找到所有的`BeanDefinitionRegistryPostProcessor`并执行它们的方法：
+```java
+String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanDefinitionRegistryPostProcessor.class, true, false);
+for (String ppName : postProcessorNames) {
+    //在BeanFactory中找到所有类型是BeanDefinitionRegistryPostProcessor的组件
+   beanFactory.getBean(ppName, BeanDefinitionRegistryPostProcessor.class);
+    //...
+}
+```
+#### ApplicationListener
+Spring提供的`事件驱动`功能，用来监听容器中发布的事件: `ApplicationEvent`及其子类。继承`ApplicationListener`并重写`onApplicationEvent(event)`
+Spring在特定位置调用`publishEvent(xxxEvent)`发布事件，`ApplicationListener`就会监听到这些事件
+获取容器的`事件派发器`，执行`getApplicationEventMulticaster().multicastEvent(applicationEvent, eventType)`
+在`multicastEvent`中，遍历所有注册的`ApplicationListener`
+```java
+for (ApplicationListener<?> listener : getApplicationListeners(event, type)) {
+    if (executor != null) {
+        // 异步
+        executor.execute(() -> invokeListener(listener, event));
+    }else {
+        // 同步
+        invokeListener(listener, event);
+    }
+}
+```
+调用`listener.onApplicationEvent(event)`
+
+#### @EventListener
+功能与`ApplicationListener`相似
+```java
+@Service
+public class UserService{
+    @EventListener(classes={ApplicationEvent.class})
+    public void listen(ApplicationEvent event){
+        // ...
+    }
+}
+```
+利用`EventListenerMethodProcessor`来解析方法上的`@EventListener`
+`EventListenerMethodProcessor`实现`SmartInitializingSingleton`接口
+`SmartInitializingSingleton`接口定义`afterSingletonsInstantiated()`方法，在所有单实例Bean创建完成之后执行
+
+## Spring容器创建原理
+`refresh()` 方法 - 容器创建，刷新
+1. `prepareRefresh()` 预处理
+   1. `initpropertySources()` 初始化属性，用于子类自定义属性
+   2. `getEnvironment().validateRequiredProperties()` 属性校验
+   3. `this.earlyApplicationEvents = new LinkedHashSet<>()` 保存容器早期事件
+2. `ConfigurableListableBeanFactory beanFactory = obtainFreshBeanFactory()` 获取Bean工厂
+   1. `refreshBeanFactory()` 刷新Bean工厂
+      1. `this.beanFactory = new DefaultListableBeanFactory()` 创建了一个Bean工厂
+      2. 设置id
+   2. `getBeanFactory()` 把刚才创建的Bean工厂返回
+3. `prepareBeanFactory(beanFactory)` Bean工厂预准备，设置Bean工厂
+   1. 设置类加载器、支持的表达式解析器……
+   2. `addBeanPostProcessor`；添加部分`BeanPostProcessor`(ApplicationContextAwareProcessor)
+   3. `ignoreDependencyInterface`；设置忽略的自动装配接口EnvironmentAware、EmbeddedValueResolverAware……
+   4. `registerResolvableDependency`；注册可以解析的自动装配组件，能直接在任何组件中@Autowired`自动注入`这些组件`BeanFactory`、`ResourceLoader`、`ApplicationEventPublisher`、`ApplicationContext`
+   5. 向`BeanFactory`中注册一些能用的组件；`environment`【ConfigurableEnvironment】、`systemProperties`【Map<String, Object>】、`systemEnvironment`【Map<String, Object>】、`applicationStartup`【ApplicationStartup】
+4. `postProcessBeanFactory(beanFactory)` Bean工厂准备工作完成后进行的`后置处理`工作，用于子类做自定义设置
+
+**以上是BeanFactory创建及准备工作**
+
+5. `invokeBeanFactoryPostProcessors(beanFactory)` 执行Bean工厂的后置处理器，在BeanFactory标准初始化之后执行；两个接口：`BeanFactoryPostProcessor`、`BeanDefinitionRegistryPostProcessor`
+   1. `invokeBeanFactoryPostProcessors`
+      1. 获取所有`BeanDefinitionRegistryPostProcessor`
+            ```java
+            List<BeanDefinitionRegistryPostProcessor> registryProcessors = new ArrayList<>();
+
+            for (BeanFactoryPostProcessor postProcessor : beanFactoryPostProcessors) {
+                if (postProcessor instanceof BeanDefinitionRegistryPostProcessor) {
+                    BeanDefinitionRegistryPostProcessor registryProcessor =
+                            (BeanDefinitionRegistryPostProcessor) postProcessor;
+                    registryProcessor.postProcessBeanDefinitionRegistry(registry);
+                    registryProcessors.add(registryProcessor);
+                }
+                else {
+                    regularPostProcessors.add(postProcessor);
+                }
+            }
+            ```
+      2. 按照`顺序`执行接口的`postProcessBeanDefinitionRegistry`
+6. `registerBeanPostProcessors(beanFactory)`注册Bean的后置处理器，拦截Bean创建过程
+   1. `beanFactory.getBeanNamesForType(BeanPostProcessor.class...)`获取所有`BeanPostProcessor`
+   2. `registerBeanPostProcessors(beanFactory, priorityOrderedPostProcessors)`依次注册`BeanPostProcessor`
+        ```java
+        PriorityOrdered -> Ordered -> 其他
+        ```
+7. `initMessageSource()`初始化`MessageSource`组件(国际化功能；消息绑定、消息解析)
+   1. 获取`BeanFactory`、查看是否有id为`"messageSource"`的Bean
+        ```java
+        ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+		if (beanFactory.containsLocalBean(MESSAGE_SOURCE_BEAN_NAME)){...}
+        ```
+   2. 如果有，直接赋值给`this.messageSource`，如果没有，创建一个`DelegatingMessageSource`并注册到容器中
+8. `initApplicationEventMulticaster()`初始化事件派发器(用于`事件驱动`开发)
+   1. 获取`BeanFactory`、查看是否有id为`"applicationEventMulticaster"`的Bean
+        ```java
+        ConfigurableListableBeanFactory beanFactory = getBeanFactory();
+		if (beanFactory.containsLocalBean(APPLICATION_EVENT_MULTICASTER_BEAN_NAME)){...}
+        ```
+   2. 如果有，直接赋值给`this.applicationEventMulticaster`，如果没有，创建一个`SimpleApplicationEventMulticaster`并注册到容器中
+9. `onRefresh()`留给子容器自定义，子类可以重写该方法
+10. `registerListeners()`给容器中注册所有项目里的`ApplicationListener`
+    1. 从容器中拿到所有`ApplicationListener`，添加到事件派发器中
+        ```java
+        String[] listenerBeanNames = getBeanNamesForType(ApplicationListener.class, true, false);
+		for (String listenerBeanName : listenerBeanNames) {
+		    getApplicationEventMulticaster().addApplicationListenerBean(listenerBeanName);
+		}
+        ```
+11. `finishBeanFactoryInitialization(beanFactory)`初始化所有剩下的`单实例`Bean
+    1. 调用`beanFactory.preInstantiateSingletons()`初始化剩下的单实例Bean
+       1. 获取所有Bean定义信息，利用`getBean(beanName)`执行创建过程
+            ```java
+            // 获取所有Bean的name
+            List<String> beanNames = new ArrayList<>(this.beanDefinitionNames);
+            for (String beanName : beanNames) {
+                // 获取Bean的定义信息
+                RootBeanDefinition bd = getMergedLocalBeanDefinition(beanName);
+                // 不是抽象，是单例，不是懒加载
+                if (!bd.isAbstract() && bd.isSingleton() && !bd.isLazyInit()) {
+                    if (isFactoryBean(beanName)) {
+                        // 如果是FactoryBean，走相关逻辑
+                        getBean(beanName);
+                    }
+                    else {
+                        getBean(beanName);
+                    }
+                }
+            }
+            ```
+          1. `Object sharedInstance = getSingleton(beanName)`先获取缓存`Map<String, Object>`中保存的单实例Bean，如果获取不到，执行创建流程
+          2. `markBeanAsCreated(beanName)`先把Bean标记为`已创建`解决多线程问题
+          3. `RootBeanDefinition mbd = getMergedLocalBeanDefinition(beanName)`获取Bean的定义信息
+          4. `mbd.getDependsOn()`获取该Bean依赖的所有Bean，如果有，则递归调用`getBean(beanName)`先创建这些依赖的Bean
+                ```java
+                String[] dependsOn = mbd.getDependsOn();
+				if (dependsOn != null) {
+                    for (String dep : dependsOn) {
+                        if (isDependent(beanName, dep)) {
+                            // A依赖B的同时B依赖A，抛出循环依赖异常
+                        }
+                        registerDependentBean(dep, beanName);
+                        try {
+                            getBean(dep);
+                        }
+                        catch (NoSuchBeanDefinitionException ex) {...}
+                    }
+				}
+                ```
+          5. 解决所有依赖之后，调用`createBean()`创建Bean
+                ```java
+                if (mbd.isSingleton()) {
+                    sharedInstance = getSingleton(beanName, () -> 
+                        // ...
+                        return createBean(beanName, mbd, args);
+                    });
+                    beanInstance = getObjectForBeanInstance(sharedInstance, name, beanName, mbd);
+				}
+                ```
+             1. `Object bean = resolveBeforeInstantiation(beanName, mbdToUse)`让`InstantiationAwareBeanPostProcessor`后置处理器拦截，触发`postProcessBeforeInstantiation`，看是否需要返回`代理对象`
+                ```java
+                try {
+                    Object bean = resolveBeforeInstantiation(beanName, mbdToUse);
+                    if (bean != null) {
+                        return bean;
+                    }
+		        }
+                ```
+             2. 如果没有代理对象，调用`Object beanInstance = doCreateBean(beanName, mbdToUse, args)`返回Bean实例
+                1. 【创建Bean实例】`createBeanInstance(beanName, mbd, args)`利用`工厂方法`或Bean的`构造器`创建出Bean实例
+                2. `applyMergedBeanDefinitionPostProcessors(mbd, beanType, beanName)`调用`MergedBeanDefinitionPostProcessor`的`postProcessMergedBeanDefinition`方法
+                3. 将生成的Bean对象提前加入缓存用来解决`循环依赖`
+                4. 【Bean属性赋值】`populateBean(beanName, mbd, instanceWrapper)`对Bean对象的属性赋值
+                   1. 赋值之前，获取所有`InstantiationAwareBeanPostProcessor`后置处理器，执行`postProcessAfterInstantiation`
+                   2. `applyPropertyValues(beanName, mbd, bw, pvs)`利用反射调用`setter`方法为Bean的属性赋值
+                5. 【Bean初始化】`exposedObject = initializeBean(beanName, exposedObject, mbd)`进行Bean的初始化
+                   1. `invokeAwareMethods(beanName, bean)`执行`Aware`接口的方法
+                   2. 【初始化之前】`wrappedBean = applyBeanPostProcessorsBeforeInitialization(wrappedBean, beanName)`执行`所有`后置处理器`postProcessBeforeInitialization`方法
+                   3. 【初始化】`invokeInitMethods(beanName, wrappedBean, mbd)`执行初始化方法
+                      1. 该Bean是否是InitializationBean接口的实现，执行该接口规定的初始化方法
+                      2. 该Bean是否指定了自定义初始化方法，执行自定义初始化方法
+                   4. 【初始化之后】`wrappedBean = applyBeanPostProcessorsAfterInitialization(wrappedBean, beanName)`执行`所有`后置处理器`postProcessAfterInitialization`方法
+                6. `registerDisposableBeanIfNecessary(beanName, bean, mbd)`注册Bean的销毁方法
+          6. 在`getSingleton(beanName, singletonFactory)`执行完 `singletonObject = singletonFactory.getObject()`后，调用`addSingleton(beanName, singletonObject)`注册生成的Bean对象，IOC容器实际就是这些`Map<String, Object>`
+       2. 所有Bean对象创建完成之后，再次遍历，判断它们是否是`SmartInitializingSingleton`接口的实现，若是，则执行对应的`afterSingletonsInstantiated`方法，用于`事件驱动`
+12. `finishRefresh()`完成IOC的创建
+    1. `initLifecycleProcessor()`初始化`BeanFactory生命周期`相关的后置处理器`LifecycleProcessor`，将这些Processor也注册进容器
+    2. `getLifecycleProcessor().onRefresh()`回调`onRefresh()`方法
+    3. 发布容器刷新完成事件`publishEvent(new ContextRefreshedEvent(this))`
+#### 总结
+1. 容器在启动的时候，先保存所有注册进来的Bean的`定义信息`: `xml`注册Bean、`注解`注册Bean`(@Bean @Service @Controller...)`
+2. 容器在合适的时机创建Bean
+   1. 用到Bean的时候，利用`getBean`创建Bean，创建好后保存在容器中
+   2. 统一创建剩下的所有Bean，也是利用`getBean`，在`finishBeanFactoryInitialization()`
+3. 后置处理器：每一个Bean创建完成后，都会使用各种后置处理器增强Bean的功能，如`AutowiredAnnotationBeanPostProcessor`处理自动注入、`AnnotationAwareAspectJAutoProxyCreator`创建代理对象做AOP...
+4. 事件驱动模型：`ApplicationListener`事件监听、`ApplicationEventMulticaster`事件派发
+
 ## Spring的AOP
 Spring中的AOP有6种增强方式，分别是：`Before` 前置增强、`After` 后置增强、`Around` 环绕增强、`AfterReturning` 最终增强、`AfterThrowing` 异常增强、`DeclareParents` 引入增强
 #### AOP术语
@@ -69,68 +287,6 @@ public class ProxyInvocationHandler implements InvocationHandler{
     }
 }
 ```
-#### 通过Spring API实现AOP
-编写增强类，一个前置增强一个后置增强
-```java
-public class Log implements MethodBeforeAdvice {
-    @Override
-    public void before(Method method, Object[] objects, Object o) throws Throwable {
-        System.out.println( o.getClass().getName() + "的" + method.getName() + "方法被执行了");
-    }
-}
-```
-```java
-public class AfterLog implements AfterReturningAdvice {
-    @Override
-    public void afterReturning(Object returnValue, Method method, Object[] args, Object target) throws Throwable {
-        System.out.println("执行了" + target.getClass().getName()
-        +"的"+method.getName()+"方法,"
-        +"返回值："+returnValue);
-    }
-}
-```
-在xml文件中注册
-```xml
-<beans>
-    <!--注册bean-->
-    <bean id="userService" class="com.kuang.service.UserServiceImpl"/>
-    <bean id="log" class="com.kuang.log.Log"/>
-    <bean id="afterLog" class="com.kuang.log.AfterLog"/>
-    <!--aop的配置-->
-    <aop:config>
-        <!--切入点  expression:表达式匹配要执行的方法-->
-        <aop:pointcut id="pointcut" expression="execution(* com.kuang.service.UserServiceImpl.*(..))"/>
-        <!--执行环绕; advice-ref执行方法 . pointcut-ref切入点-->
-        <aop:advisor advice-ref="log" pointcut-ref="pointcut"/>
-        <aop:advisor advice-ref="afterLog" pointcut-ref="pointcut"/>
-    </aop:config>
-</beans>
-```
-#### 通过自定义类实现AOP
-定义自己的切入类
-```java
-public class DiyPointcut {
-    public void before(){
-        System.out.println("---------方法执行前---------");
-    }
-    public void after(){
-        System.out.println("---------方法执行后---------");
-    }
-}
-```
-在xml文件中配置
-```xml
-<bean id="diy" class="com.kuang.config.DiyPointcut"/>
-
-<aop:config>
-    <!--第二种方式：使用AOP的标签实现-->
-    <aop:aspect ref="diy">
-        <aop:pointcut id="diyPonitcut" expression="execution(* com.kuang.service.UserServiceImpl.*(..))"/>
-        <aop:before pointcut-ref="diyPonitcut" method="before"/>
-        <aop:after pointcut-ref="diyPonitcut" method="after"/>
-    </aop:aspect>
-</aop:config>
-```
 #### 通过注解实现AOP
 编写一个注解实现的增强类
 ```java
@@ -162,6 +318,309 @@ public class AnnotationPointcut {
 <!--开启注解支持-->
 <aop:aspectj-autoproxy/>
 ```
+#### BeanPostProcessor
+`BeanPostProcessor`接口是bean的后置处理器，可以在bean`初始化`前后进行一些处理工作
+```java
+public interface BeanPostProcessor {
+    @Nullable
+    default Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
+
+    @Nullable
+    default Object postProcessAfterInitialization(Object bean, String beanName) throws BeansException {
+        return bean;
+    }
+}
+```
+#### Aware
+组件想要使用Spring容器`底层`的一些组件(ApplicationContext, BeanFactory，xxx)，就要实现xxxAware，在`创建对象`的时候会调用接口中规定的`set`方法注入相关组件
+```java
+public interface ApplicationContextAware extends Aware {
+    void setApplicationContext(ApplicationContext applicationContext) throws BeansException;
+}
+```
+xxxAware的功能使用xxxProcessor(`BeanPostProcessor`)来处理
+后置处理器在bean初始化的时候判断它是否`实现`了xxxAware，如果实现了，则调用对应的set方法
+
+## SpringAOP底层原理
+核心：**@EnableAspectJAutoProxy**
+```java
+@Import(AspectJAutoProxyRegistrar.class)
+public @interface EnableAspectJAutoProxy {}
+```
+`AspectJAutoProxyRegistrar`通过实现`ImportBeanDefinitionRegistrar`接口自定义注册组件，向容器中注册一个`AnnotationAwareAspectJAutoProxyCreator`
+```java
+class AspectJAutoProxyRegistrar implements ImportBeanDefinitionRegistrar {
+	@Override
+	public void registerBeanDefinitions(
+			AnnotationMetadata importingClassMetadata, BeanDefinitionRegistry registry) {
+
+		AopConfigUtils.registerAspectJAnnotationAutoProxyCreatorIfNecessary(registry);
+
+		AnnotationAttributes enableAspectJAutoProxy =
+				AnnotationConfigUtils.attributesFor(importingClassMetadata, EnableAspectJAutoProxy.class);
+		if (enableAspectJAutoProxy != null) {
+			if (enableAspectJAutoProxy.getBoolean("proxyTargetClass")) {
+				AopConfigUtils.forceAutoProxyCreatorToUseClassProxying(registry);
+			}
+			if (enableAspectJAutoProxy.getBoolean("exposeProxy")) {
+				AopConfigUtils.forceAutoProxyCreatorToExposeProxy(registry);
+			}
+		}
+	}
+
+}
+```
+#### AnnotationAwareAspectJAutoProxyCreator
+```java
+AnnotationAwareAspectJAutoProxyCreator
+    -> AbstractAutoProxyCreator
+        implements SmartInstantiationAwareBeanPostProcessor, BeanFactoryAware
+```
+一个`后置处理器`，一个`Aware`
+#### 创建流程
+1. 传入配置类，创建ioc容器
+2. 注册配置类，调用`refresh()`刷新容器
+3. `refresh()`中调用`registerBeanPostProcessors(beanFactory)`注册bean后置处理器拦截bean的创建
+   1. 获取容器中已经定义的所有`BeanPostProcessor`(尚未创建对象)
+        ```java
+        String[] postProcessorNames = beanFactory.getBeanNamesForType(BeanPostProcessor.class, true, false);
+        ```
+   2. 遍历`postProcessorNames`从`beanFactory`拿bean对象，如果没有则创建。实际上就是`创建对象`并保存在容器中
+        ```java
+        // 正确逻辑是，先处理实现了PriorityOrdered的processor，再处理实现了Ordered的processor，最后是其他processor
+        for(String ppName : postProcessorNames){
+            // 初次创建时，在factory中找不到bean对象，所以触发创建对象的操作，这里涉及到spring三次缓存
+            BeanPostProcessor pp = beanFactory.getBean(ppName, BeanPostProcessor.class);
+        }
+        ```
+       1. 调用`doCreateBean`创建对象
+            ```java
+            // 创建Bean实例
+            instanceWrapper = createBeanInstance(beanName, mbd, args);
+            // Bean实例赋值
+            populateBean(beanName, mbd, instanceWrapper);
+            // 初始化Bean
+            exposedObject = initializeBean(beanName, exposedObject, mbd);
+            ```
+           1. `initializeBean`中调用`invokeAwareMethods`处理Aware接口，在这里，就是调用`BeanFactoryAware`的`setBeanFactory`方法
+                ```java
+                private void invokeAwareMethods(String beanName, Object bean) {
+                    if (bean instanceof Aware) {
+                        if (bean instanceof BeanNameAware) {
+                            ((BeanNameAware) bean).setBeanName(beanName);
+                        }
+                        if (bean instanceof BeanClassLoaderAware) {
+                            ClassLoader bcl = getBeanClassLoader();
+                            if (bcl != null) {
+                                ((BeanClassLoaderAware) bean).setBeanClassLoader(bcl);
+                            }
+                        }
+                        if (bean instanceof BeanFactoryAware) {
+                            ((BeanFactoryAware) bean).setBeanFactory(AbstractAutowireCapableBeanFactory.this);
+                        }
+                    }
+                }
+                ```
+           2. 调用`applyBeanPostProcessorsBeforeInitialization`应用后置处理器的`BeforeInitialization`方法
+                ```java
+                for (BeanPostProcessor processor : getBeanPostProcessors()) {
+                    Object current = processor.postProcessBeforeInitialization(result, beanName);
+                    if (current == null) {
+                        return result;
+                    }
+                    result = current;
+                }
+                ```
+            1. 调用`invokeInitMethods`执行初始化方法
+            2. 调用`applyBeanPostProcessorsAfterInitialization`应用后置处理器的`AfterInitialization`方法
+                ```java
+                for (BeanPostProcessor processor : getBeanPostProcessors()) {
+                    Object current = processor.postProcessAfterInitialization(result, beanName);
+                    if (current == null) {
+                        return result;
+                    }
+                    result = current;
+                }
+                ```
+        1. BeanPostProcessor(`AnnotationAwareAspectJAutoProxyCreator`)创建成功
+    1. 把创建好的`BeanPostProcessor`组成一个list，统一注册到`BeanFactory`中
+        ```java
+        registerBeanPostProcessors(beanFactory, priorityOrderedPostProcessors);
+
+        private static void registerBeanPostProcessors(
+			ConfigurableListableBeanFactory beanFactory, List<BeanPostProcessor> postProcessors) {
+
+            if (beanFactory instanceof AbstractBeanFactory) {
+                ((AbstractBeanFactory) beanFactory).addBeanPostProcessors(postProcessors);
+            }
+            else {
+                for (BeanPostProcessor postProcessor : postProcessors) {
+                    beanFactory.addBeanPostProcessor(postProcessor);
+                }
+            }
+        }
+        ```
+4. `refresh()`中调用`finishBeanFactoryInitialization(beanFactory)`完成BeanFactory初始化工作(创建剩下的单实例)
+    1. `遍历`容器中的所有Bean，依次调用`getBean(beanName)`方法创建对象，获取不到则创建，所有创建好的Bean都会被缓存起来
+        ```java
+        List<String> beanNames = new ArrayList<>(this.beanDefinitionNames);
+
+        for (String beanName : beanNames) {
+            RootBeanDefinition bd = getMergedLocalBeanDefinition(beanName);
+            if (!bd.isAbstract() && bd.isSingleton() && !bd.isLazyInit()) {
+                if (isFactoryBean(beanName)) {
+                    //...
+                }
+                else {
+                    getBean(beanName);
+                }
+            }
+        }
+        ```
+        getBean -> doGetBean -> createBean
+        1. 调用`createBean`创建Bean
+           1. `resolveBeforeInstantiation(beanName, mbdToUse);`解析BeforeInstantiation，希望后置处理器在这里能返回一个`代理对象`，如果不能，就继续调用`doCreateBean`
+                ```java
+                // 遍历InstantiationAwareBeanPostProcessor执行它的postProcessBeforeInstantiation方法
+                bean = applyBeanPostProcessorsBeforeInstantiation(targetType, beanName);
+                if (bean != null) {
+                    // 遍历BeanPostProcessor执行它的postProcessAfterInitialization
+                    bean = applyBeanPostProcessorsAfterInitialization(bean, beanName);
+                }
+                ```
+                **【BeanPostProcessor在Bean对象初始化前后调用】**
+                **【InstantiationAwareBeanPostProcessor在Bean对象创建前后调用】**
+        2. 在`AnnotationAwareAspectJAutoProxyCreator`的bean对象创建之前，由于它实现了`InstantiationAwareBeanPostProcessor`接口，所以会执行对应的`postProcessBeforeInstantiation`方法，每一个Bean创建之前，都会调用上述方法
+            ```java
+            if (!StringUtils.hasLength(beanName) || !this.targetSourcedBeans.contains(beanName)) {
+                // 判断当前bean是否在advisedBeans中(保存了所有需要增强的Bean)
+                if (this.advisedBeans.containsKey(cacheKey)) {
+                    return null;
+                }
+                // 判断当前bean是否是基础类型或切面、是否需要跳过
+                if (isInfrastructureClass(beanClass) || shouldSkip(beanClass, beanName)) {
+                    this.advisedBeans.put(cacheKey, Boolean.FALSE);
+                    return null;
+                }
+            }
+            ```
+        3. 在`AnnotationAwareAspectJAutoProxyCreator`的bean对象初始化之后，由于它实现了`InstantiationAwareBeanPostProcessor`接口，这个接口本身也是`BeanPostProcessor`接口，所以会执行对应的`postProcessAfterInitialization`方法
+            ```java
+            public Object postProcessAfterInitialization(@Nullable Object bean, String beanName) {
+                if (bean != null) {
+                    Object cacheKey = getCacheKey(bean.getClass(), beanName);
+                    if (this.earlyProxyReferences.remove(cacheKey) != bean) {
+                        return wrapIfNecessary(bean, beanName, cacheKey);
+                    }
+                }
+                return bean;
+            }
+            ```
+            1. 获取当前bean的所有`增强器`(通知方法)
+                ```java
+                Object[] specificInterceptors = getAdvicesAndAdvisorsForBean(bean.getClass(), beanName, null);
+                ```
+                找到能在当前bean使用的增强器(哪些通知方法是需要切入当前bean方法的)
+                ```java
+                protected List<Advisor> findEligibleAdvisors(Class<?> beanClass, String beanName) {
+                    List<Advisor> candidateAdvisors = findCandidateAdvisors();
+                    List<Advisor> eligibleAdvisors = findAdvisorsThatCanApply(candidateAdvisors, beanClass, beanName);
+                    extendAdvisors(eligibleAdvisors);
+                    if (!eligibleAdvisors.isEmpty()) {
+                        eligibleAdvisors = sortAdvisors(eligibleAdvisors);
+                    }
+                    return eligibleAdvisors;
+                }
+                ```
+            2. 保存当前bean到`advisedBeans`当中，调用`createProxy`创建代理对象
+                ```java
+                if (specificInterceptors != DO_NOT_PROXY) {
+                    this.advisedBeans.put(cacheKey, Boolean.TRUE);
+                    Object proxy = createProxy(
+                            bean.getClass(), beanName, specificInterceptors, new SingletonTargetSource(bean));
+                    this.proxyTypes.put(cacheKey, proxy.getClass());
+                    return proxy;
+                }
+                ```
+                1. 将上一步提取出的`增强器`(通知方法)保存到`proxyFactory`
+                    ```java
+                    Advisor[] advisors = buildAdvisors(beanName, specificInterceptors);
+                    proxyFactory.addAdvisors(advisors);
+                    proxyFactory.setTargetSource(targetSource);
+                    customizeProxyFactory(proxyFactory);
+                    ```
+                2. 调用`proxyFactory.getProxy`获取代理对象，有`JdkDynamicAopProxy`和`CglibAopProxy`
+        4. 给容器中返回的是增强了的`代理对象`
+#### 调用流程
+当目标方法执行时，使用的是容器中组件的`代理对象`(cglib/jdk增强后的对象)，该对象保存了详细信息(增强器、目标对象、……)
+1. 执行`CglibAopProxy.DynamicAdvisedInterceptor.intercept`方法
+   1. 根据`ProxyFactory`对象获取将要执行的`目标方法`的拦截器链
+        ```java
+        List<Object> chain = this.advised.getInterceptorsAndDynamicInterceptionAdvice(method, targetClass);
+        ```
+      1. 调用`advisorChainFactory.getInterceptorsAndDynamicInterceptionAdvice`方法获取拦截器链
+         1. 获取所有增强器(`Advisor`)，遍历，将其包装成`Interceptor[] interceptors`
+            ```java
+            Advisor[] advisors = config.getAdvisors();
+            List<Object> interceptorList = new ArrayList<>(advisors.length);
+            for (Advisor advisor : advisors) {
+                if (advisor instanceof PointcutAdvisor) {
+                    PointcutAdvisor pointcutAdvisor = (PointcutAdvisor) advisor;
+                    // ...
+                    MethodInterceptor[] interceptors = 
+                    // 这里面将advisor.getAdvice()转为MethodInterceptor，如果不能直接转使用适配器进行一次包装
+                    registry.getInterceptors(advisor);
+                    interceptorList.addAll(Arrays.asList(interceptors));
+                } //...
+            }
+            return interceptorList;
+            ```
+   2. 如果没有拦截器链，直接执行目标方法，如果有，则创建一个`CglibMethodInvocation`对象并调用它的`proceed`方法
+        ```java
+        if (chain.isEmpty() && CglibMethodInvocation.isMethodProxyCompatible(method)) {
+            Object[] argsToUse = AopProxyUtils.adaptArgumentsIfNecessary(method, args);
+            retVal = methodProxy.invoke(target, argsToUse);
+        }
+        else {
+            retVal = new CglibMethodInvocation(proxy, target, method, args, targetClass, chain, methodProxy).proceed();
+        }
+        ```
+        1. `this.currentInterceptorIndex`记录当前拦截器索引，初始值为-1，如果没有拦截器，到了最后一个拦截器，直接执行目标方法
+            ```java
+            if (this.currentInterceptorIndex == this.interceptorsAndDynamicMethodMatchers.size() - 1) {
+                return invokeJoinpoint();
+            }
+            ```
+        2. 每次调用，更新`this.currentInterceptorIndex`，取出对应的Interceptor，执行它的`invoke`方法，每一个Interceptor等待下一个拦截器执行完成返回以后再来执行
+            ```java
+            Object interceptorOrInterceptionAdvice =
+				this.interceptorsAndDynamicMethodMatchers.get(++this.currentInterceptorIndex);
+            if (interceptorOrInterceptionAdvice instanceof InterceptorAndDynamicMethodMatcher) {
+                //...
+            }
+            else {
+                return ((MethodInterceptor) interceptorOrInterceptionAdvice).invoke(this);
+            }
+            ```
+#### 总结
+1. `@EnableAspectJAutoProxy`开启AOP功能
+2. `@EnableAspectJAutoProxy`会向容器中注册一个组件`AnnotationAwareAspectJAutoProxyCreator`
+3. `AnnotationAwareAspectJAutoProxyCreator`是一个后置处理器
+4. 容器创建流程：
+   1. `registerBeanPostProcessors()`注册后置处理器，创建`AnnotationAwareAspectJAutoProxyCreator`对象
+   2. `finishBeanFactoryInitialization()`初始化剩下的单实例bean
+      1. 创建`业务逻辑组件`和`切面组件`
+      2. `AnnotationAwareAspectJAutoProxyCreator`这个后置处理器会来拦截创建过程
+      3. 组件创建完成后，后置处理器执行`postProcessAfterInitialization`，判断组件是否需要增强，将切面的通知方法，包装成增强器(`Advisor`)，为业务逻辑组件创建一个`代理对象`(cglib)，代理对象中就有所有的增强器
+5. 执行目标方法：
+   1. 实际上是`代理对象`执行目标方法
+   2. `CglibAopProxy.intercept()`
+      1. 得到目标方法的`拦截器链`(`Advisor`包装成`Interceptor`)
+      2. 利用拦截器的链式机制，依次执行每一个拦截器
+         正常：前置通知 -> 目标方法 -> 后置通知 -> 返回通知
+         异常：前置通知 -> 目标方法 -> 后置通知 -> 异常通知
 
 ## Bean作用域
 **singleton**
@@ -431,66 +890,3 @@ public class RestFulController {
     }
 }
 ```
-
-## SpringBoot自动配置
-pom.xml
-* `spring-boot-dependencies`: 核心依赖，在父工程中
-* `spring-boot-starter`: 启动器，springboot将功能场景封装成一个个启动器，如`spring-boot-starter-web`、`spring-boot-starter-test`
-#### @SpringBootApplication
-标注在某个类上说明这个类是SpringBoot的主启动类
-```java
-@SpringBootApplication
-public class SpringbootApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(SpringbootApplication.class, args);
-    }
-}
-```
-```java
-@SpringBootConfiguration
-@EnableAutoConfiguration
-@ComponentScan(
-    excludeFilters = {@Filter(
-    type = FilterType.CUSTOM,
-    classes = {TypeExcludeFilter.class}
-), @Filter(
-    type = FilterType.CUSTOM,
-    classes = {AutoConfigurationExcludeFilter.class}
-)}
-)
-public @interface SpringBootApplication {
-    // ......
-}
-```
-#### @ComponentScan
-Spring中的组件，用于自动扫描并加载符合条件的`组件`或者`bean` ， 将这个bean定义加载到`IOC`容器中
-#### @SpringBootConfiguration
-标注在某个类上 ， 表示这是一个SpringBoot的配置类
-```java
-@Configuration
-public @interface SpringBootConfiguration {}
-
-@Component
-public @interface Configuration {}
-```
-**@Configuration** 说明这是一个`配置类` ，配置类就是对应Spring的`xml`配置文件
-#### @EnableAutoConfiguration
-开启自动配置功能
-```java
-@AutoConfigurationPackage
-@Import({AutoConfigurationImportSelector.class})
-public @interface EnableAutoConfiguration {
-    // ...
-}
-```
-```java
-@Import({Registrar.class})
-public @interface AutoConfigurationPackage {
-}
-```
-**@AutoConfigurationPackage** 自动配置包
-**@import** Spring底层注解，给容器中导入一个`组件`
-* `Registrar.class`：将主启动类的所在包及包下面所有子包里面的所有`组件`扫描到Spring容器；
-* `AutoConfigurationImportSelector.class`：自动配置导入选择器
-#### AutoConfigurationImportSelector
-
