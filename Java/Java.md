@@ -332,3 +332,100 @@ public @interface MyAnnotation{
 }
 ```
 
+## synthetic
+[视频地址](https://www.bilibili.com/video/BV1dy4y1V7ck?p=8)
+
+用于解决`外部类`和`内部类`之间相互访问时的语法正确性问题
+java编译器会将外部类和内部类编译成两个class
+用`synthetic`关键字标注所有存在于`字节码`但不存在于`源码`中的`构造`
+构造 => Field、Method、Constructor
+**Field**
+```java
+public class FieldDemo{
+
+    public String hello(){
+        return "hello";
+    }
+
+    class FieldDemoInner{
+        // synthetic FieldDemo this$0;
+
+        public void sayHello{
+            System.out.println(hello());
+        }
+    }
+}
+```
+当内部类在没有外部类实例化`对象`的情况下依旧能直接调用外部类方法
+编译时自动生成外部类对象属性
+**Method**
+```java
+public class MethodDemo{
+
+    class MethodDemoInner{
+        private String name;
+
+        /*
+        synthetic String access$000(){
+            return this.name;
+        }
+
+        synthetic void access$001(String name){
+            this.name = name;
+        }
+        */
+    }
+
+    public void getInnerName(){
+        return new MethodDemoInner.name;
+    }
+
+    public String setInnerName(String name){
+        new MethodDemoInner.name = name;
+    }
+}
+```
+外部类能直接访问内部类的`private`属性
+编译时根据使用情况自动生成` get set `方法
+**Constructor**
+```java
+public class ConstructorDemo{
+
+    public ConstructorDemoInner inner = new ConstructorDemoInner();
+
+    class ConstructorDemoInner{
+        private ConstructorDemoInner(){}
+
+        /*
+        synthetic ConstructorDemoInner(){}
+        */
+    }
+}
+```
+外部类能直接实例化只有`private`构造器的内部类
+编译时自动生成内部类的构造器
+
+## NBAC
+[视频地址](https://www.bilibili.com/video/BV1dy4y1V7ck?p=9)
+
+Nested Based Access Control 基于嵌套类的访问控制
+
+* JDK11之前，在内部类中`直接访问`外部类的`private`方法，由于synthetic的存在是可以正常访问的，但在内部类中`反射调用`外部类的`private`方法时会抛`Access`异常
+* 为了解决这种二义性，从`JDK11`开始引入了`NBAC`来控制外部类与内部类之间的相互访问
+* 在Class类中新增了 `nesttHost` 和 `nestMembers` 来指向嵌套宿主与嵌套成员
+```java
+public class Outer{
+    class Inner{
+        
+    }
+
+    public static void main(String[] args) throws Exception {
+        Class netstHost = Outer.Inner.class.getNestHost(); // Outer
+        Class netstHost = Outer.class.getNestHost(); // Outer
+
+        Class<?> nestMembers =  Outer.Inner.class.getNestMembers(); // {Outer, Inner}
+        Class<?> nestMembers =  Outer.class.getNestMembers(); // {Outer, Inner}
+    }
+}
+```
+由于 `nesttHost` 和 `nestMembers` 的存在JVM可以轻易验证两个类之间的嵌套关系，同时由于外部类和内部类都持有对方的引用，因此可以访问对方的`private`构造
