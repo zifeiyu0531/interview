@@ -270,6 +270,159 @@ public void addResourceHandlers(ResourceHandlerRegistry registry) {
 }
 ```
 
+## SpringBoot请求处理
+#### REST映射
+在每一个`Controller`层方法上使用
+```java
+@RequestMapping(value = "/user", method = RequestMethod.GET)
+// 或
+@GetMapping("/user")
+```
+声明一个请求映射
+- 表单提交时只能选择`GET POST`两种请求方式，其他无法识别的请求默认按照GET处理
+- 如果需要使用其他方法，需要在`POST`请求时携带`"_method"`参数，值为方法名（`PUT DELETE`）
+
+**HiddenHttpMethodFilter**
+```java
+public static final String DEFAULT_METHOD_PARAMETER_NAME = "_method";
+
+private String methodParamName = DEFAULT_METHOD_PARAMETER_NAME;
+
+public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
+    // 如果不是POST，直接放行
+    if (exchange.getRequest().getMethod() != HttpMethod.POST) {
+        return chain.filter(exchange);
+    }
+    // 提取出_method参数的值
+    return exchange.getFormData()
+            .map(formData -> {
+                String method = formData.getFirst(this.methodParamName);
+                return StringUtils.hasLength(method) ? mapExchange(exchange, method) : exchange;
+            })
+            .flatMap(chain::filter);
+}
+
+private ServerWebExchange mapExchange(ServerWebExchange exchange, String methodParamValue) {
+    // 获取对应请求方法
+    HttpMethod httpMethod = HttpMethod.resolve(methodParamValue.toUpperCase(Locale.ENGLISH));
+    Assert.notNull(httpMethod, () -> "HttpMethod '" + methodParamValue + "' not supported");
+    if (ALLOWED_METHODS.contains(httpMethod)) {
+        return exchange.mutate().request(builder -> builder.method(httpMethod)).build();
+    }
+    else {
+        return exchange;
+    }
+}
+```
+如果使用其他工具能直接发`PUT DELETE`方法，那就不走相关逻辑
+#### 请求映射原理
+所有请求到达后，都会先进入`DispatherServlet`，它是由`HttpServlet`继承而来
+```
+DispatcherServlet -> FrameworkServlet -> HttpServletBean -> HttpServlet
+```
+- 在`FrameworkServlet`中重写了`HttpServlet`的`doGet`、`doPost`、`doPut`、`doDelete`等方法，都走`processRequest(request, response)`，在内部调用`doService(request, response)`
+```java
+@Override
+protected final void doGet(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    processRequest(request, response);
+}
+
+protected final void processRequest(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+    // ...
+    try {
+        doService(request, response);
+    }
+    // ...
+}
+```
+- 在`DispatcherServlet`中实现了`doService`方法，在内部调用`doDispatch(request, response)`，遍历所有`HandlerMapping`找`Handler`
+```java
+@Override
+protected void doService(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    // ...
+    try {
+        doDispatch(request, response);
+    }
+    // ...
+}
+
+protected void doDispatch(HttpServletRequest request, HttpServletResponse response) throws Exception {
+    // 为请求找到Controller的对应方法
+    mappedHandler = getHandler(processedRequest);
+    if (mappedHandler == null) {
+        noHandlerFound(processedRequest, response);
+        return;
+    }
+}
+
+protected HandlerExecutionChain getHandler(HttpServletRequest request) throws Exception {
+    if (this.handlerMappings != null) {
+        // 从所有HandlerMapping找对应的Handler
+        for (HandlerMapping mapping : this.handlerMappings) {
+            HandlerExecutionChain handler = mapping.getHandler(request);
+            if (handler != null) {
+                return handler;
+            }
+        }
+    }
+    return null;
+}
+```
+- `HandlerMapping`：处理器映射，包括`RequestMappingHandlerMapping`、`WelcomePageHandlerMapping`、`BeanNameUrlHandlerMapping`、`RouterFunctionMapping`、`SimpleUrlHandlerMapping`等
+- `RequestMappingHandlerMapping`：`@RequestMapping`的处理器映射，保存了所有`@RequestMapping`和`Handler`的映射关系，具体在
+```java
+RequestMappingHandlerMapping -> RequestMappingInfoHandlerMapping -> 
+AbstractHandlerMethodMapping.mappingRegistry.registry
+
+private final Map<T, MappingRegistration<T>> registry = new HashMap<>();
+```
+![](./pic/registry.png)
+- `mapping.getHandler(request)`最终会调用AbstractHandlerMethodMapping中的`getHandlerInternal(request)`方法，在内部调用`lookupHandlerMethod(lookupPath, request)`根据请求和路径找到对应的`Handler`
+```java
+protected HandlerMethod getHandlerInternal(HttpServletRequest request) throws Exception {
+    // 获取请求路径信息("/hello")
+    String lookupPath = initLookupPath(request);
+    this.mappingRegistry.acquireReadLock();
+    try {
+        HandlerMethod handlerMethod = lookupHandlerMethod(lookupPath, request);
+        return (handlerMethod != null ? handlerMethod.createWithResolvedBean() : null);
+    }
+    finally {
+        this.mappingRegistry.releaseReadLock();
+    }
+}
+
+protected HandlerMethod lookupHandlerMethod(String lookupPath, HttpServletRequest request) throws Exception {
+    List<Match> matches = new ArrayList<>();
+    List<T> directPathMatches = this.mappingRegistry.getMappingsByDirectPath(lookupPath);
+    if (directPathMatches != null) {
+        // 向matches中放入合适的Handler
+        addMatchingMappings(directPathMatches, matches, request);
+    }
+    if (matches.isEmpty()) {
+        // 没找到合适的，放入默认Handler
+        addMatchingMappings(this.mappingRegistry.getRegistrations().keySet(), matches, request);
+    }
+    if (!matches.isEmpty()) {
+        Match bestMatch = matches.get(0);
+        // 一类特定请求只能被一个Handler处理
+        if (matches.size() > 1) {
+            // 各种复杂对比、排序...
+            // 发现多个Handler，抛出异常
+            throw new IllegalStateException("Ambiguous handler methods mapped for '" + uri + "': {" + m1 + ", " + m2 + "}");
+        }
+        request.setAttribute(BEST_MATCHING_HANDLER_ATTRIBUTE, bestMatch.getHandlerMethod());
+        handleMatch(bestMatch.mapping, lookupPath, request);
+        // 返回Controller对应的方法
+        return bestMatch.getHandlerMethod();
+    }
+    else {
+        return handleNoMatch(this.mappingRegistry.getRegistrations().keySet(), lookupPath, request);
+    }
+}
+```
+- 如果需要自定义映射处理，也可以实现`HandlerMapping`注册到容器中
+
 
 ## 最佳实践
 - 引入相关场景依赖
@@ -333,4 +486,70 @@ k:
     <artifactId>spring-boot-configuration-processor</artifactId>
     <optional>true</optional>
 </dependency>
+```
+#### 常用参数注解
+**@PathVariable** 获取路径参数
+```java
+@GetMapping("/getUser/{id}")
+public Map<String, Object> getUser(@PathVariable("id") int id) {
+    // ...
+}
+```
+**@RequestHeader** 获取请求头
+```java
+@GetMapping("/getUser")
+public Map<String, Object> getUser(@RequestHeader("User-Agent") String userAgent,
+                                   @RequestHeader HttpHeaders httpHeaders) {
+   // 可以直接使用org.springframework.http.HttpHeaders类绑定请求头信息
+}
+```
+**@RequestParam** 获取请求参数
+```java
+@GetMapping("/getUser")
+public Map<String, Object> getUser(@RequestParam("age") Integer age) {
+    // 获取/getUser?age=xxx的参数
+}
+```
+**@CookieValue** 获取Cookie信息
+```java
+@GetMapping("/getUser")
+public Map<String, Object> getUser(@CookieValue("_ga") String ga,
+                                   @CookieValue Cookie cookie) {
+    // 可以直接使用javax.servlet.http.Cookie类绑定Cookie信息
+    String name = cookie.getName(); // _ga
+    String value = cookie.getValue();
+}
+```
+**@RequestBody** 获取POST请求时的表单信息
+```java
+@PostMapping("/getUser")
+public Map<String, Object> postUser(@RequestBody User user) {
+    // 和自定义类绑定
+}
+```
+**@RequestAttribute** 获取请求域中的参数
+**@ResponseBody** 将Java对象的返回值解析为JSON数据
+```java
+@GetMapping("/goto")
+public String goToSuccess(HttpServletRequest request) {
+    request.setAttribute("msg", "succ");
+    return "forward:/success"; // 将请求转发到 /success
+}
+
+@ResponseBody
+@GetMapping("/success")
+public Map<String, Object> success(@RequestAttribute("msg") String msg,
+                                   HttpServletRequest request) {
+    Object msg1 = request.getAttribute("msg");
+    return new HashMap<>();
+}
+```
+**@MatrixVariable** 获取矩阵变量，SpringBoot默认`禁用`矩阵变量(`UrlPathHelper`解析的时候会把路径分号信息移除)
+```java
+// /users/1;age=18;name=zhangsan
+@GetMapping("/users/{id}")
+public Map<String, Object> users(@MatrixVariable("age") Integer age,
+                                 @MatrixVariable("name") String name) {
+    // ...
+}
 ```
