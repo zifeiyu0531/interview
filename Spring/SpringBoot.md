@@ -1363,3 +1363,107 @@ public Map<String, Object> users(@MatrixVariable("age") Integer age,
     // ...
 }
 ```
+#### Mybatis
+- 引入`mybatis-starter`
+- 配置`application.yaml`，指定`mapper-location`位置
+- 编写Mapper接口，使用`@Mapper`修饰
+- 使用`注解`(@Select)或`xml`的方式编写sql语句
+#### Mybatis Plus
+- 不需要在配置文件中指定`mapper-location`位置，默认扫描`classpath:mapper/*.xml`
+- 编写Mapper接口的时候继承`BaseMapper<T>`，其中定义了基础的增删改查功能
+
+## 自定义Starter
+![](./pic/starter.png)
+创建`starter`项目，依赖自定义的`autoconfigure`，依赖`spring-boot-starter`
+- 在自定义的`autoconfigure`中编写自动配置类`xxxAutoConfiguration`
+```java
+@Configuration
+@EnableConfigurationProperties(HelloProperties.class) // 将HelloProperties放入容器
+public class MyAutoConfiguration {
+
+    @ConditionalOnMissingBean(HelloService.class)
+    @Bean
+    public HelloService helloService() {
+        return new HelloService();
+    }
+}
+```
+- 在自定义的`autoconfigure`的`classpath:META-INF/`下创建`spring.factories`，配置`EnableAutoConfiguration`
+```properties
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+com.zifeiyu.demo.configure.MyAutoConfiguration
+```
+- 打包`starter`，在项目中引入`starter`依赖
+
+## 事件监听器
+**1. ApplicationContextInitializer**
+```java
+public interface ApplicationContextInitializer<C extends ConfigurableApplicationContext> {
+    /**
+    * Initialize the given application context.
+    * @param applicationContext the application to configure
+    */
+    void initialize(C applicationContext);
+}
+```
+**2. ApplicationListener**
+```java
+public interface ApplicationListener<E extends ApplicationEvent> extends EventListener {
+    /**
+    * Handle an application event.
+    * @param event the event to respond to
+    */
+    void onApplicationEvent(E event);
+
+
+    /**
+    * Create a new {@code ApplicationListener} for the given payload consumer.
+    */
+    static <T> ApplicationListener<PayloadApplicationEvent<T>> forPayload(Consumer<T> consumer) {
+        return event -> consumer.accept(event.getPayload());
+    }
+}
+```
+**3. SpringApplicationRunListener**
+```java
+public interface SpringApplicationRunListener {
+    default void starting(ConfigurableBootstrapContext bootstrapContext) {}
+
+    default void environmentPrepared(ConfigurableBootstrapContext bootstrapContext, ConfigurableEnvironment environment) {}
+
+    default void contextPrepared(ConfigurableApplicationContext context) {}
+
+    default void contextLoaded(ConfigurableApplicationContext context) {}
+
+    default void started(ConfigurableApplicationContext context, Duration timeTaken) {}
+    
+    default void ready(ConfigurableApplicationContext context, Duration timeTaken) {}
+
+    default void failed(ConfigurableApplicationContext context, Throwable exception) {}
+}
+```
+**4. ApplicationRunner**
+```java
+public interface ApplicationRunner {
+    void run(ApplicationArguments args) throws Exception;
+}
+```
+**5. CommandLineRunner**
+```java
+public interface CommandLineRunner {
+    void run(String... args) throws Exception;
+}
+```
+- 在项目中实现这些接口实现相应监听功能
+- 对于`ApplicationContextInitializer`、`ApplicationListener`、`SpringApplicationRunListener`。在`classpath:META-INF/`下创建`spring.factories`，配置相应类
+```properties
+org.springframework.context.ApplicationContextInitializer=\
+com.zifeiyu.demo.listener.MyApplicationContextInitializer
+
+org.springframework.context.ApplicationListener=\
+com.zifeiyu.demo.listener.MyApplicationListener
+
+org.springframework.boot.SpringApplicationRunListener=\
+com.zifeiyu.demo.listener.MySpringApplicationRunListener
+```
+- 对于`ApplicationRunner`、`CommandLineRunner`，从容器中获取，所以需要使用`@Component`将自定义的类放入容器
