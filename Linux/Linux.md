@@ -77,3 +77,8 @@ apt-get clean 从下载的软件包中清理缓存
 **lsof -i:8080 查看占用8080端口进程的信息**
 kill id 根据id结束进程
 kill -9 id 根据id结束进程 - 无条件终止
+
+#### 网络
+**tcpdump 监视第一个网络接口上所有流过的数据包**
+tcpdump -i eth0 -c 10 监视指定网络接口的数据包
+tcpdump -i eth0 host 10.20.3.25 监视指定主机的数据包
