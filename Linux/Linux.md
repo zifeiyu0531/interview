@@ -82,6 +82,14 @@ kill -9 id 根据id结束进程 - 无条件终止
 **tcpdump 监视第一个网络接口上所有流过的数据包**
 tcpdump -i eth0 -c 10 监视指定网络接口的数据包
 tcpdump -i eth0 host 10.20.3.25 监视指定主机的数据包
+ifconfig 网络配置查看
+route 用于显示和操作 IP 路由表
+netstat -anpt 用来查看当前操作系统的网络连接状态、路由表、接口统计等信息
+ss -l 显示本地打开的所有端口
+ss -s 列出当前 socket 详细信息
+ss -at 显示所有 tcp socket
+nslookup www.baidu.com 域名解析工具
+arp -n 显示 ARP 表
 
 #### 防火墙
 ```shell
