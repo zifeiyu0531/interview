@@ -250,3 +250,17 @@ max.in.flight.requests.per.connection=1（不需要考虑是否开启幂等性�
 注册新节点 -> 创建新的负载均衡计划 -> 执行新的负载均衡计划
 #### 退役旧节点
 创建计划，将旧节点数据迁移到其他节点 -> 执行计划
+
+## Kafka优缺点
+#### 优点
+**Producer**
+批量发送、数据压缩
+**Broker**
+顺序写、消息索引、零拷贝
+**Consumer**
+Rebalance
+#### 缺点
+1. 运维成本高
+2. 对于负载不均衡的场景，解决方案复杂
+3. 没有自己的缓存，完全依赖Page Cache
+4. Controller和Coordinator和Broker在同一进程中，大量IO会造成性能下降
