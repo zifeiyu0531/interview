@@ -114,3 +114,12 @@ firewall-cmd --reload
 2、--permanent：表示设置为持久；
 3、--add-port：标识添加的端口；
 ```
+
+## Linux文件系统
+一切皆文件
+文件系统接口：文件系统繁多，如Ext2/3/4，sysfs，rootfs等，但都遵循`VFS`统一抽象接口
+Linux文件系统的两大数据结构：`Index Node` & `Directory Entry`
+**Index Node**
+记录文件元数据，如id、大小、权限、磁盘位置等。inode是一个文件等`唯一标识`，会被存储到`磁盘`上。inode总数在格式化文件系统时就固定了
+**Directory Entry**
+记录文件名、inode指针、层级关系(parent)等。dentry是`内存`结构，与inode的关系是`N:1`(hardlink的实现)
