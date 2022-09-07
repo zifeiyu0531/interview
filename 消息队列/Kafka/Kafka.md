@@ -251,6 +251,47 @@ max.in.flight.requests.per.connection=1（不需要考虑是否开启幂等性�
 #### 退役旧节点
 创建计划，将旧节点数据迁移到其他节点 -> 执行计划
 
+## Kafka事务
+- KAFKA 的事务机制，是 KAFKA 实现端到端有且仅有一次语义（end-to-end EOS)的基础；
+- KAFKA 的事务机制，涉及到 transactional producer 和 transactional consumer, 两者配合使用，才能实现端到端有且仅有一次的语义（end-to-end EOS)；
+- 当然kakfa 的 producer 和 consumer 是解耦的，你也可以使用非 transactional 的 consumer 来消费 transactional producer 生产的消息，但此时就丢失了事务 ACID 的支持；
+- 通过事务机制，KAFKA 可以实现对多个 topic 的多个 partition 的原子性的写入，即处于同一个事务内的所有消息，不管最终需要落地到哪个 topic 的哪个 partition, 最终结果都是要么全部写成功，要么全部写失败（Atomic multi-partition writes）；
+- KAFKA的事务机制，在底层依赖于`幂等生产者`，幂等生产者是 kafka 事务的必要不充分条件；
+- 事实上，开启 kafka事务时，kafka 会自动开启幂等生产者。
+#### 如何支持事务
+为支持事务机制，KAFKA 引入了两个新的组件：**Transaction Coordinator** 和 **Transaction Log**
+- transaction coordinator 是运行在每个 kafka broker 上的一个模块，是 kafka broker 进程承载的新功能之一（不是一个独立的新的进程）；
+- transaction log 是 kafka 的一个内部 topic（类似大家熟悉的 __consumer_offsets ，是一个内部 topic）；
+- transaction log 有多个分区，每个分区都有一个 leader，该 leade对应哪个 kafka broker，哪个 broker 上的 transaction coordinator 就负责对这些分区的写操作；
+- 由于 transaction coordinator 是 kafka broker 内部的一个模块，而 transaction log 是 kakfa 的一个内部 topic, 所以 KAFKA 可以通过内部的复制协议和选举机制（replication protocol and leader election processes)，来确保 transaction coordinator 的可用性和 transaction state 的持久性；
+- transaction log topic 内部存储的只是事务的最新状态和其相关元数据信息，kafka producer 生产的原始消息，仍然是只存储在kafka producer指定的 topic 中。事务的状态有：“Ongoing,” “Prepare commit,” 和 “Completed” 。
+- 实际上，每个 transactional.id 通过 hash 都对应到 了 transaction log 的一个分区，所以每个 transactional.id 都有且仅有一个 transaction coordinator 负责。
+
+为支持事务机制，KAFKA 将日志文件格式进行了扩展，添加了控制消息 **control batch**
+- 日志中除了普通的消息，还有一种消息专门用来标志事务的状态，它就是控制消息 control batch；
+- 控制消息跟其他正常的消息一样，都被存储在日志中，但控制消息不会被返回给 consumer 客户端；
+- 控制消息共有两种类型：commit 和 abort，分别用来表征事务已经成功提交或已经被成功终止；
+- RecordBatch 中 attributes 字段的第5位用来标志当前消息是否处于事务中，1代表消息处于事务中，0则反之；（A record batch is a container for records. ）
+- RecordBatch 中 attributes 字段的第6位用来标识当前消息是否是控制消息，1代表是控制消息，0则反之；
+- 由于控制消息总是处于事务中，所以控制消息对应的RecordBatch 的 attributes 字段的第5位和第6位都被置为1；
+#### 事务机制下Kafka读写流程
+KAFKA transactional api 的调用顺序：
+![](pic/transaction1.png)
+1. KAFKA 生产者通过 `initTransactions` API 将 transactional.id **注册**到 transactional coordinator：此时，此时 coordinator 会关闭所有有相同 transactional.id 且处于 pending 状态的事务，同时也会递增 epoch 来屏蔽僵尸生产者 （zombie producers）. 该操作对每个 producer session 只执行一次.(producer.initTransaction())
+2. KAFKA 生产者通过 `beginTransaction` API 开启事务，并通过 send API 发送消息到目标topic：此时消息对应的 partition 会首先被注册到 transactional coordinator，然后 producer 按照正常流程发送消息到目标 topic，且在发送消息时内部会通过校验屏蔽掉僵尸生产者（zombie producers are fenced out.（producer.beginTransaction();producer.send()*N;）；
+3. KAFKA 生产者通过 `commitTransaction` API 提交事务或通过`abortTransaction` API回滚事务：此时会向 transactional coordinator 提交请求，开始两阶段提交协议 (producer.commitTransaction();producer.abortTransaction();
+   - 在两阶段提交协议的第一阶段，transactional coordinator 更新内存中的事务状态为 “prepare_commit”，并将该状态持久化到 transaction log 中；
+   - 在两阶段提交协议的第二阶段， coordinator 首先写 transaction marker 标记到目标 topic 的目标 partition，这里的 transaction marker，就是我们上文说的控制消息，控制消息共有两种类型：commit 和 abort，分别用来表征事务已经成功提交或已经被成功终止；
+   - 在两阶段提交协议的第二阶段， coordinator 在向目标 topic 的目标 partition 写完控制消息后，会更新事务状态为 “commited” 或 “abort”， 并将该状态持久化到 transaction log 中；
+4. KAFKA 消费者消费消息时可以指定具体的读隔离级别，当指定使用 read_committed 隔离级别时，在内部会使用存储在目标 topic-partition 中的 事务控制消息，来过滤掉没有提交的消息，包括回滚的消息和尚未提交的消息;需要注意的是，过滤消息时，KAFKA consumer 不需要跟 transactional coordinator 进行 rpc 交互，因为 topic 中存储的消息，包括正常的数据消息和控制消息，包含了足够的元数据信息来支持消息过滤；KAFKA 消费者消费消息时也可以指定使用 read_uncommitted 隔离级别，此时目标 topic-partition 中的所有消息都会被返回，不会进行过滤。
+#### 事务容错
+- transaction coordinator 是运行在每个 kafka broker 上的一个模块，是 kafka broker 进程承载的新功能之一（不是一个独立的新的进程）；
+- transaction coordinator 将事务的状态保存在内存中，并持久化到 transaction log 中;
+- transaction log 是 kakafa 的一个内部 topic（类似大家熟悉的 consumer_offsets ，是一个内部 topic）；
+- transaction log 有多个分区，每个分区都有一个 leader，该 leade对应哪个 kafka broker，则那个 broker上的 transaction coordinator 就负责对这些分区的写操作；
+- transaction coordinator 是唯一负责读写 transaction log 的组件，如果某个 kafka broker 宕机的话，其负责的 transaction log 的 partitions 就没有了对应的 leader，此时会通过选举机制选举出一个新的 coordinator，该 coordinator 会从这些 transaction log partitions 在其它节点的副本中恢复状态数据；
+- 正是由于 transaction log 是 kakfa 的一个内部 topic, 所以 KAFKA 可以通过内部的复制协议和选举机制（replication protocol and leader election processes)，来确保对事务状态 transaction state 的持久化存储，以及对 transaction coordinator 的容错。
+
 ## Kafka优缺点
 #### 优点
 **Producer**
