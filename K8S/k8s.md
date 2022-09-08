@@ -87,7 +87,7 @@ Kubernetes Porxy实现了以下功能：
 3. 负载均衡能力。
 
 ## Flannel
-Flannel是CoreOS团队针对Kubernetes设计的一个网络规划服务，简单来说，它的功能是让集群中的不同节点主机创建的Docker容器都具有全集群唯一的虚拟IP地址。
+Flannel是CoreOS团队针对Kubernetes设计的一个网络规划服务，简单来说，它的功能是让集群中的不同节点主机创建的Docker容器都具有`全集群唯一`的虚拟IP地址。
 
 在默认的Docker配置中，每个节点上的Docker服务会分别负责所在节点容器的IP分配。这样导致的一个问题是，不同节点上容器可能获得`相同`的内外IP地址。
 
@@ -432,3 +432,10 @@ example.org {
 }
 ```
 那么在 CoreDNS 服务启动时，对于当前的 example.org 这个组，它会依次加载 file、log、errors 和 prometheus 几个插件
+
+## Ingress
+Ingress是授权入站连接到达集群服务的`规则集合`。您可以给Ingress配置外部可访问的URL、负载均衡、SSL、基于名称的虚拟主机等。
+Service是基于`四层TCP和UDP`协议转发的，而Ingress可以基于`七层的HTTP和HTTPS`协议转发，可以通过域名和路径做到更细粒度的划分，如下图所示。
+![](./pic/ingress.png)
+要想使用Ingress功能，必须在Kubernetes集群上安装Ingress Controller。Ingress Controller有很多种实现，最常见的就是Kubernetes官方维护的`NGINX Ingress Controller`
+外部请求首先到达Ingress Controller，Ingress Controller根据Ingress的`路由规则`，查找到对应的`Service`，进而通过Endpoint查询到Pod的IP地址，然后将请求转发给Pod。
