@@ -715,6 +715,16 @@ public class B {
 2. 如果获取不到或者对象正在创建中（isSingletonCurrentlyInCreation()），那就再从`二级缓存`earlySingletonObjects中获取。（如果获取到就直接return）
 3. 如果还是获取不到，且允许singletonFactories（allowEarlyReference=true）通过getObject()获取。就从`三级缓存`singletonFactory.getObject()获取。
 
+让我们来分析一下“A的某个field或者setter依赖了B的实例对象，同时B的某个field或者setter依赖了A的实例对象”这种循环依赖的情景。
+
+1. A 调用doCreateBean()创建Bean对象：由于还未创建，从第1级缓存singletonObjects查不到，此时只是一个半成品（提前暴露的对象），放入`第3级缓存`singletonFactories。
+2. A在属性填充时发现自己需要B对象，但是在三级缓存中均未发现B，于是创建B的半成品，放入`第3级缓存`singletonFactories。
+3. B在属性填充时发现自己需要A对象，从第1级缓存singletonObjects和第2级缓存earlySingletonObjects中未发现A，但是在第3级缓存singletonFactories中发现A，将A放入`第2级缓存`earlySingletonObjects，同时从第3级缓存singletonFactories`删除`。
+4. 将A注入到对象B中。
+5. B完成属性填充，执行初始化方法，将自己放入`第1级缓存`singletonObjects中（此时B是一个完整的对象），同时从`第3级缓存`singletonFactories和`第2级缓存`earlySingletonObjects中删除。
+6. A得到“对象B的完整实例”，将B注入到A中。
+7. A完成属性填充，执行初始化方法，并放入到`第1级缓存`singletonObjects中。
+
 ## Spring常用注解
 **声明bean的注解**
 @Component 组件，没有明确的角色
