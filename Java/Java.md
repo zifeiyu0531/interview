@@ -551,3 +551,27 @@ public class Outer{
 }
 ```
 由于 `nesttHost` 和 `nestMembers` 的存在JVM可以轻易验证两个类之间的嵌套关系，同时由于外部类和内部类都持有对方的引用，因此可以访问对方的`private`构造
+
+## SPI
+SPI（Service Provider Interface，服务提供者接口）是系统为第三方专门开放的扩展规范以及动态加载扩展点的机制。
+#### SPI使用
+- 先编写好服务接口的实现类，即服务提供类；
+- 然后在`classpath`的`META-INF/services`目录下创建一个以`接口`全限定名命名的文本文件，并在该文件中写入`实现类`的全限定名（如果有多个实现类，以换行符分隔）；
+- 最后调用JDK中的`java.util.ServiceLoader`组件中的`load()`方法，就会根据上述文件来发现并加载具体的`服务实现`。
+#### JDBC中的SPI
+JDBC是为用户通过Java访问数据库提供的统一接口，而数据库千变万化，因此借助SPI机制可以灵活地实现数据库驱动的插件化。
+
+在使用旧版JDBC时，我们必须首先调用类似`Class.forName("com.mysql.jdbc.Driver")`的方法，通过反射来手动加载数据库驱动。JDBC中的接口是Java的核心包，在`rt.jar`中，这个jar是由`BootstrapClassLoadre`来加载的。而`Class.forName`使用的是当前类的类加载器，当前类的类加载器是`BootstrapClassLoader`，我们知道`BootstrapClassLoader`默认是加载`rt.jar`的。明显第三方实现不在`rt.jar`。这就破坏了双亲委派模型。
+
+但是在新版JDBC中已经不用写了，只需直接调用`DriverManager.getConnection()`方法即可获得数据库连接。新版JDBC利用SPI机制来获取并加载驱动提供类（java.sql.Driver接口的实现类），SPI是采用`ContextClassLoader`来加载第三方实现类，这样就避免了父`BootstrapClassLoader`去应该由加载子`AppClassLoader`加载的类
+#### ContextClassLoader
+上下文类加载器，正常情况下，线程执行到某个类的时候，只能看到这个类对应加载器所加载的类。但是你可以为当前`线程`设置一个类加载器，然后可视范围就增加多一个类加载器加载的类
+
+jdk内部类用`引导类加载器`加载，调SPI接口的方法依赖外部JAR包用`应用类加载器`加载，父加载器访问不到子加载器的类。但是可以设置当前线程的上下文类加载器，把当前线程上下文类加载器加载的类一并纳入可视范围
+
+父ClassLoader可以使用当前线程`Thread.current.currentThread().getContextClassLoader()`所指定的classLoader加载的类。这就改变了父ClassLoader不能使用子ClassLoader加载的类的情况，即改变了双亲委托模型。
+
+在双亲委托模型下，类加载器是由下至上的，即下层的类加载器会委托上层进行加载。但是对于`SPI`来说，有些接口是JAVA核心库提供的，而JAVA核心库是由`启动类加载器`来加载的，而这些接口的实现却来自于不同的jar包（厂商提供），JAVA的启动类加载器是不会加载其他来源的jar包，这样传统的双亲委托模型就无法满足SPI的要求。而通过给当前线程设置`上下文类加载器`，就可以设置的上下文类加载器来实现对于接口实现类的加载。
+![](pic/context.png)
+- ContextClassLoader默认为`AppClassLoader`
+- 子线程ContextClassLoader默认为父线程的ContextClassLoader
