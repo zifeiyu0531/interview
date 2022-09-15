@@ -85,6 +85,15 @@ StringBuffer和StringBuilder类的对象能够被多次的修改，并且不产�
 2. 待删除节点的左右子节点`都为null`，删除时将该节点置为null;
 3. 待删除节点的左右子节点`有一个有值`，则用有值的节点替换该节点即可；
 4. 待删除节点的左右子节点`都不为null`，则找前驱或者后继，将前驱或者后继的值复制到该节点中，然后删除前驱或者后继（`前驱：左子树中值最大的节点，后继：右子树中值最小的节点`）；
+#### 红黑树和平衡二叉树
+- 平衡二叉树的左右子树的高度差绝对值不超过1，但是红黑树在某些时刻可能会`超过1`，只要符合红黑树的五个条件即可。
+- 二叉树只要不平衡就会进行`旋转`，而红黑树不符合规则时，有些情况只用改变颜色不用旋转，就能达到平衡。
+#### 效率对比
+|      | 二叉查找树 | 平衡二叉树 | 红黑树  |
+| ---- | ---------- | ---------- | ------- |
+| 查找 | O(n)       | O(logn)    | Olog(n) |
+| 插入 | O(n)       | O(logn)    | Olog(n) |
+| 删除 | O(n)       | O(logn)    | Olog(n) |
 
 ## HashMap
 #### HashMap底层数据结构
@@ -330,36 +339,37 @@ TreeMap存储K-V键值对，通过`红黑树`实现；天然支持排序，默�
 4. 待删除节点的左右子节点`都不为null`，则找前驱或者后继，将前驱或者后继的值复制到该节点中，然后删除前驱或者后继（`前驱：左子树中值最大的节点，后继：右子树中值最小的节点`）；
 
 ## ConcurrentHashMap
-![](pic/cmap.png)
-在ConcurrentHashMap中有个重要的概念就是Segment。我们知道HashMap的结构是`数组+链表`形式，从图中我们可以看出其实每个segment就类似于一个HashMap。Segment包含一个`HashEntry数组`，数组中的每一个HashEntry既是一个`键值对`，也是一个链表的`头节点`。在ConcurrentHashMap中有2的N次方个Segment，共同保存在一个名为`segments数组`当中。可以说，ConcurrentHashMap是一个`二级哈希表`。在一个总的哈希表下面，有若干个子哈希表。
-为什么说ConcurrentHashMap的性能要比HashTable好，HashTables是用`全局同步锁`，而CconurrentHashMap采用的是`锁分段`，每一个Segment就好比一个自治区，读写操作高度自治，Segment之间互不干扰。
-**Case1:不同Segment的并发写入**
-不同Segment的写入是可以`并发`执行的。
-**Case2:同一Segment的一写一读**
-同一Segment的写和读是可以`并发`执行的。
-**Case3:同一Segment的并发写入**
-Segment的写入是需要`上锁`的，因此对同一Segment的并发写入会被阻塞。
-由此可见，ConcurrentHashMap当中每个Segment各自持有一把锁。在保证线程安全的同时`降低了锁的粒度`，让并发操作效率更高。
-**Get方法**
-1. 为输入的Key做Hash运算，得到hash值。
-2. 通过hash值，定位到对应的`Segment对象`
-3. 再次通过hash值，定位到Segment当中数组的`具体位置`。
+#### ConcurrentHashMap与Hashtable比较
+1. 线程安全的实现：Hashtable采用对象锁(synchronized修饰对象方法)来保证线程安全，也就是一个Hashtable对象只有一把锁，如果线程1拿了对象A的锁进行有synchronized修饰的put方法，其他线程是无法操作对象A中有synchronized修饰的方法的(如get方法、remove方法等)，竞争激烈所以效率低下。而ConcurrentHashMap采用`CAS + synchronized`来保证并发安全性，且synchronized关键字不是用在方法上而是用在了具体的对象上，实现了更小粒度的锁。
+2. 数据结构的实现：Hashtable采用的是数组 + 链表，当链表过长会影响查询效率，而ConcurrentHashMap采用数组 + 链表 + 红黑树，当链表长度超过某一个值，则将链表转成红黑树，提高查询效率。
+#### init
+1. 如果table==null，进入循环。
+2. case1: `sizeCtl< 0` 说明其他线程抢先对table初始化或者扩容，就调用Thread.yield(); 让出一次cpu，等下次抢到cpu再循环判断。
+3. case2: 以CAS操作`CASsizeCtl=-1`,表示当前线程正在初始化。下面就开始初始化。
+4. 判断sizeCtl的值。 sc(sizeCtl)大于0，则 容量大小=sc，sc(sizeCtl)<=0，即如果在使用了有参数的构造函数，sc=sizeCtl=指定的容量大小,否则n=默认的容量大小16。
+5. 用上面求出的容量大小new出table数组。
+6. 计算阈值，sizeCtl = n - (n >>> 2) = 0.75*n。
+#### put
+1. 校验Key，value是否为空。如果有一个为null，那么直接报NullPointerException异常。所以可以得出concurrentHashMap中Key，value不能为空。
+2. 循环尝试插入。进入循环。
+   1. case1:如果没有初始化就先调用`initTable()`方法来进行初始化过程
+   2. case2:根据Hash值计算插入位置`(n - 1) & hash=i`。如果`没有hash冲突`,也就是说插入位置上面没有数据，就直接`casTabAt()`方法将数据插入。
+   3. case3:插入位置上有数据。数据的头节点的哈希地址为-1(即链表的头节点为ForwardingNode节点)，则表示其他线程正在对table进行扩容（transfer），就先等着,等其他线程扩容完了咱们再尝试插入。
+   4. case4:上面情况都没有。就对首节点加`synchronized`锁来保证线程安全，两种情况，一种是链表形式就直接遍历到`尾端`插入，一种是`红黑树`就按照红黑树结构插入，结束加锁。
+   5. 如果Hash冲突时会形成Node链表，在链表长度超过8，Node数组超过64 时会将链表结构转换为红黑树的结构。
+3. break退出循环。
+4. 调用`addCount()`方法统计Map已存储的键值对数量size++，检查是否需要扩容，需要扩容就扩容。
+#### 扩容
+Hash表的扩容，一般都包含两个步骤：
+1. table数组的扩容，一般就是新建一个2倍大小的槽数组，这个过程通过由一个单线程完成，且不允许出现并发。
+2. 数据迁移，就是把旧table中的各个槽中的结点重新分配到新table中*。
 
-**Put方法**
-1. 为输入的Key做Hash运算，得到hash值。
-2. 通过hash值，定位到对应的`Segment对象`
-3. 获取`可重入锁`
-4. 再次通过hash值，定位到Segment当中数组的`具体位置`。
-5. 插入或覆盖HashEntry对象。
-6. 释放锁。
-
-**size方法**
-1. 遍历所有的Segment。
-2. 把Segment的`元素数量`累加起来。
-3. 把Segment的`修改次数`累加起来。
-4. 判断所有Segment的总修改次数是否大于上一次的总修改次数。如果大于，说明`统计过程中有修改`，重新统计，尝试次数+1；如果不是。说明没有修改，统计结束。
-
-在JDK1.8中ConcurrentHashMap的实现方式有了很大的改变，在JDK1.7中采用的是Segment + HashEntry，而Sement继承了ReentrantLock，所以自带锁功能，而在JDK1.8中则`取消了Segment`，作者认为Segment太过臃肿，采用`CAS + Synchronized`保证线程安全
+这一过程通常涉及到槽中key的rehash(重新Hash)，因为key映射到桶的位置与table的大小有关，新table的大小变了，key映射的位置一般也会变化。
+ConcurrentHashMap在处理rehash的时候，并不会重新计算每个key的hash值，而是利用了一种很巧妙的方法。我们在上一篇说过，ConcurrentHashMap内部的table数组的大小必须为2的幂次，原因是让key均匀分布，减少冲突，这只是其中一个原因。另一个原因就是：
+当table数组的大小为2的幂次时，通过key.hash & table.length-1这种方式计算出的索引i，当table扩容后（2倍），新的索引要么在原来的位置i，要么是i+n。
+而且还有一个特点，扩容后key对应的索引如果发生了变化，那么其变化后的索引最高位一定是1 
+#### 为什么get不需要加锁
+get操作全程不需要加锁是因为Node的成员val是用`volatile`修饰的，在多线程环境下线程A修改结点的val或者新增节点的时候是对线程B可见的。
 
 ## Collection和Collections
 java.util.Collection是一个`集合接口`（集合类的一个顶级接口）。它提供了对集合对象进行基本操作的通用接口方法。Collection接口在Java 类库中有很多具体的实现。Collection接口的意义是为各种具体的集合提供了最大化的统一操作方式。
@@ -424,6 +434,163 @@ Test test = (a)->{
 };
 
 test.doTest(10);
+```
+
+## Lambda-Stream
+**Stream**
+数据的渠道,用来操作由数据源(`数组`,`集合`)所产生的元素序列.
+- IO : 传输数据
+- Stream流 : 操作数据,计算数据
+- 数组/集合 : 存储数据
+
+**特点**
+1. Stream流本身不会存储数据
+2. Stream不会修改数据源|源对象,每次回返回持有结果的新的流Stream
+3. 延迟执行|惰性加载 : 当获取终止行为时候,才会执行一系列的中间操作
+4. 流都是一次性的流,不能重复使用多次,一旦使用过就已经被破坏
+
+**步骤**
+1. 创建Stream
+    1)Collection->stream
+    2)Arrays->stream(数组)
+    3)Stream.of(值列表)
+2. 一系列流式的中间操作(都会返回一个持有结果的新的流)
+3. 终止行为
+```java
+public class Class001_Stream {
+    public static void main(String[] args) {
+        //Collection-->stream()
+        Stream<Integer> stream =  List.of(1,2,3,4,5).stream();
+        System.out.println(stream);
+        stream.forEach(System.out::println);
+ 
+        //Arrays->stream(数组)
+        String[] arr = {"aaa","bbb","ccc"};
+        Stream<String> stream1 = Arrays.stream(arr);
+        stream1.forEach(System.out::println);
+ 
+        //Stream.of(值列表)
+        Stream<Integer> stream2 = Stream.of(5,4,3,2,1);
+        stream2.forEach(System.out::println);
+    }
+}
+```
+**中间操作**
+1. 过滤 Stream `filter`(Predicate<? super T> predicate);
+2. 去重 `distinct`() 比较equals与hashCode()
+3. 截取 `limit`(long) 从第一个开始截取几个
+4. 跳过 `skip`(long) 跳过前n个
+5. 排序 `sorted`() --> 内部比较器 sorted(Comparator) ->外部比较器
+6. 映射 `map`(Function fun) stream操作的每一个数据都所用于参数函数,映射成一个新的结果,最后返回一个持有所有映射后的新的结果的流
+```java
+public class Class002_Stream {
+    public static void main(String[] args) {
+        List<Employee> list = Arrays.asList(
+                new Employee("bcd",27,9500),
+                new Employee("aaa",29,10000),
+                new Employee("abc",28,8000),
+                new Employee("bc",28,9000),
+                new Employee("bc",28,9000),
+                new Employee("cde",30,12000)
+        );
+        //获取Stream
+        Stream<Employee> stream = list.stream();
+        //中间操作
+        //过滤
+        //stream = stream.filter(e-> e.getAge()>=28);
+        //流式调用|链式调用
+        //stream = stream.distinct().limit(3).skip(1);
+ 
+        //排序
+        //stream = stream.sorted();
+        stream = stream.sorted((x,y)->Double.compare(y.getSalary(),x.getSalary()));  //不能通过方法引用
+ 
+        Stream<String> names = stream.map(e->e.getName()).distinct();
+ 
+        list.stream().map(e->e.getSalary()).distinct().filter(s->s>=10000).sorted().forEach(System.out::println);
+ 
+        //终止行为
+        //stream.forEach(System.out::println);
+        names.forEach(System.out::println);
+    }
+}
+```
+**终止行为**
+1. 遍历  foreach(Consumer)
+2. 查找与匹配
+```
+allMatch-检查是否匹配所有元素
+anyMatch-检查是否至少匹配一个元素
+noneMatch-检查是否没有匹配所有元素
+findFirst-返回第一个元素
+findAny-返回当前流中的任意元素
+count-返回流中元素的总个数
+max-返回流中最大值
+min-返回流中最小值
+```
+3. 规约 reduce map->reduce 加工->计算结果
+4. 收集 collect()
+```java
+public class Class003_Stream {
+    public static void main(String[] args) {
+        List<Employee> list = Arrays.asList(
+                new Employee("bcd",27,9500),
+                new Employee("aaa",29,10000),
+                new Employee("abc",28,8000),
+                new Employee("bc",28,9000),
+                new Employee("bc",28,9000),
+                new Employee("cde",30,12000)
+        );
+ 
+        //判断每一个员工是否都>=20岁
+        boolean flag = list.stream().distinct().allMatch(e->e.getAge()>=20);
+        System.out.println(flag);
+ 
+        //查找薪资最高的员工
+        //Optional<T> 存储一个数据的容器类型->jdk8新增的容器类型-->帮助避免空指针异常的出现
+        Optional<Employee> op = list.stream().sorted((x, y)->Double.compare(y.getSalary(),x.getSalary())).findFirst();
+        System.out.println(op.get());
+ 
+        //parallelStream() 并行流
+        System.out.println(list.stream().parallel().findAny().get());
+ 
+        System.out.println(list.stream().filter(e->e.getSalary()<=10000).count());
+ 
+        查找薪资最高的员工
+        System.out.println(list.stream().distinct().max((x,y)->Double.compare(x.getSalary(),y.getSalary())).get());;
+ 
+        //规约
+        //找到公司所有员工的薪资,求和
+        System.out.println(list.stream().map(Employee::getSalary).reduce((x,y)->x+y).get());;
+        //1+2+3+4+5
+        Stream<Integer> stream = Stream.of(1,2,3,4,5);
+        /*System.out.println(stream.reduce((x,y)->{
+            System.out.println("运算过程 : x = "+x+",y = "+y);
+            return x+y;
+        }).get());*/
+ 
+        System.out.println(stream.reduce(100,(x,y)->{
+            System.out.println("运算过程 : x = "+x+",y = "+y);
+            return x+y;
+        }));;
+ 
+        //收集collect
+        System.out.println(list.stream().distinct().count());
+        //static <T> Collector<T,?,Long> counting() 返回类型为 T的 Collector接受元素，用于计算输入元素的数量。
+        System.out.println(list.stream().distinct().collect(Collectors.counting()));
+        //平均薪资  static <T> Collector<T,?,Double> averagingDouble(ToDoubleFunction<? super T> mapper) 返回 Collector ，它生成应用于输入元素的双值函数的算术平均值。
+        System.out.println(list.stream().distinct().collect(Collectors.averagingDouble(Employee::getSalary)));
+ 
+        //static <T> Collector<T,?,List<T>> toList() 返回 Collector ，将输入元素累积到新的 List 。
+        System.out.println(list.stream().filter(e->e.getAge()>=28).collect(Collectors.toList()));
+        //static <T> Collector<T,?,Set<T>> toSet() 返回 Collector ，将输入元素累积到新的 Set 。
+        System.out.println(list.stream().filter(e->e.getAge()>=28).collect(Collectors.toSet()));
+ 
+        //static <T,K,U>
+        //Collector<T,?,Map<K,U>> toMap(Function<? super T,? extends K> keyMapper, Function<? super T,? extends U> valueMapper) 返回 Collector ，它将元素累积到 Map其键和值是将提供的映射函数应用于输入元素的结果。
+        System.out.println(list.stream().distinct().collect(Collectors.toMap(Employee::getName,Employee::getSalary)));
+    }
+}
 ```
 
 ## 元注解
@@ -575,3 +742,88 @@ jdk内部类用`引导类加载器`加载，调SPI接口的方法依赖外部JAR
 ![](pic/context.png)
 - ContextClassLoader默认为`AppClassLoader`
 - 子线程ContextClassLoader默认为父线程的ContextClassLoader
+
+## JDK1.8新特性
+1. Lamdba表达式
+2. 函数式接口
+   - `Function` 有输入参数，也有返回值。
+    ```java
+    @FunctionalInterface
+    public interface Function<T, R> {
+        R apply(T t);
+    }
+    ```
+   - `Consumer` 有输入参数，没有返回值
+    ```java
+    @FunctionalInterface
+    public interface Consumer<T> {
+        void accept(T t);
+    }
+    ```
+   - `Supplier` 没有输入参数，有返回值
+    ```java
+    @FunctionalInterface
+    public interface Supplier<T> {
+        T get();
+    }
+    ```
+   - `Predicate` 既有输入参数也有返回值，返回类型是boolean类型
+    ```java
+    @FunctionalInterface
+    public interface Predicate<T> {
+        boolean test(T t);
+    }
+    ```
+3. 方法引用和构造器引用
+   - 方法引用
+    当要传递给`Lambda`体的操作已经有实现方法，可以直接使用方法引用(实现抽象方法的列表，必须要和方法引用的方法`参数列表一致`)
+    方法引用：使用操作符"`::`"将方法名和（类或者对象）分割开来。
+    ```java
+    public class MethodRefDemo {
+        public static void main(String[] args) {
+            FunctionGeneric<String> strName = s -> System.out.println(s);
+            strName.fun("Lambda表达式没有使用方法引用");
+            //方法引用
+            FunctionGeneric<String> strName2 = System.out::println;
+            strName2.fun("使用方法引用");​
+        }
+    }​
+    ```
+   - 构造器引用
+    本质上：构造器引用和方法引用相似，只是使用了一个`new`方法
+    使用说明：函数式接口参数列表和构造器`参数列表要一致`，该接口返回值类型也是构造器返回值类型
+    格式：`ClassName::new`
+    ```java
+    public class MethodRefDemo {
+        public static void main(String[] args) {​
+            //构造器引用
+            Function<String, Integer> fun1 = (num) -> new Integer(num);
+            Function<String, Integer> fun2 = Integer::new;​
+            //数组引用
+            Function<Integer,Integer[]> fun3 = (num) ->new Integer[num];
+            Function<Integer,Integer[]> fun4 = Integer[]::new;
+        }
+    }​
+    ```
+4. Stream API
+5. 接口中的默认方法和静态方法
+   - 默认方法
+    java8允许接口中包含具体实现的方法体，该方法是默认方法，它需要使用`default`关键字修饰
+   - 静态方法
+    java8中允许接口中定义静态方法，使用`static`关键字修饰
+    ```java    ​
+    public interface DefaultMethodDemo {
+        default Integer addMethod(int a ,int b){
+            System.out.println("我是默认方法");
+            return a+b;
+        }
+        static void test(){
+            System.out.println("我是静态方法");
+        }
+    }​
+    ```
+6. 新时间日期API
+7. OPtional
+    optional类是一个容器，代表一个值`存在`或者`不存在`，原来使用`null`表示一个值存不存在，现在使用optional可以更好的表达这个概念，并且可以避免`空指针异常`。
+
+8. 其他特性
