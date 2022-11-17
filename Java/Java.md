@@ -91,9 +91,9 @@ StringBuffer和StringBuilder类的对象能够被多次的修改，并且不产�
 #### 效率对比
 |      | 二叉查找树 | 平衡二叉树 | 红黑树  |
 | ---- | ---------- | ---------- | ------- |
-| 查找 | O(n)       | O(logn)    | Olog(n) |
-| 插入 | O(n)       | O(logn)    | Olog(n) |
-| 删除 | O(n)       | O(logn)    | Olog(n) |
+| 查找 | O(n)       | O(logn)    | O(logn) |
+| 插入 | O(n)       | O(logn)    | O(logn) |
+| 删除 | O(n)       | O(logn)    | O(logn) |
 
 ## HashMap
 #### HashMap底层数据结构
@@ -281,6 +281,36 @@ List的古老实现类；`线程安全`，效率低；底层使用`数组`实现
 ## equals与==的区别
 `基本数据类型`byte,short,char,int,long,float,double,boolean。他们之间的比较，用双等号 == ,比较的是他们的`值`。
 equals()是Object里的方法。在Object的equals中，就是使用 == 来进行比较，比较的是`内存地址`。与==不同的是，在某些Object的子类中，覆盖了equals()方法，比如String中的equals()方法比较两个字符串对象的`内容`是否相同。
+```java
+Integer d3 = 1;
+Integer d4 = 1;
+Integer d5 = 128;
+Integer d6 = 128;
+System.out.println(d3 == d4); 
+//结果：true
+System.out.println(d5 == d6); 
+//结果：false
+```
+都是给Integer类型的参数，直接赋值后进行比较。d3和d4判断的结果相等，但d5和d6判断的结果却不相等。
+因为Integer有一个**常量池**，-128~127直接的Integer数据直接缓存进入常量池。所以1在常量池，而128不在。
+```java
+String e = "abc";
+String f = "abc";
+String g = new String("abc");
+String h = new String("abc");
+System.out.println(e == f); 
+//结果：true
+System.out.println(e == g); 
+//结果：false
+System.out.println(g == h); 
+//结果：false
+```
+
+## Java自动拆装箱
+JDK5提供了一个新特性，当基本类型和引用类型`相互赋值`时，会自动调用装箱或拆箱方法，自动补全代码
+自动装箱：基本数据类型默认提升它对应的包装类型：int-->Integer
+自动拆箱：对应的包装类类型自动转换为基本类型：Integer-->int
+
 
 ## Java序列化
 **实现序列化**
@@ -327,6 +357,14 @@ Integer 的对象可以调用该类的方法，但是在拆箱之前不能进行
 ## 反射
 JAVA反射机制是在`运行状态`中，对于任意一个类，都能够知道这个类的所有属性和方法；对于任意一个对象，都能够调用它的任意方法和属性；这种动态获取信息以及动态调用对象方法的功能称为java语言的反射机制。
 在日常的第三方应用开发过程中，经常会遇到某个类的某个成员变量、方法或是属性是私有的或是只对系统应用开放，这时候就可以利用Java的反射机制通过反射来获取所需的私有成员或方法。
+#### 反射的原理
+**核心**:JVM在运行时才动态加载类或者调用方法以及访问属性,不需要事先(比如编译时)知道运行对象是什么
+1. 当我们编写完一个Java项目之后，每个java文件都会被编译成一个`.class`文件。
+2. 这些class文件在程序运行时会被`ClassLoader`加载到JVM中，当一个类被加载以后，JVM就会在内存中自动产生一个`Class对象`。
+3. 通过Class对象获取`Field/Method/Construcor`
+
+反射是什么呢？当我们的程序在运行时，需要`动态`的加载一些类这些类可能之前用不到所以不用加载到jvm，而是在运行时根据需要才加载。
+原来使用new的时候，需要明确的指定类名，这个时候属于硬编码实现，而在使用反射的时候，可以只传入类名参数，就可以生成对象，降低了耦合性，使得程序更具灵活性。
 
 ## TreeMap
 TreeMap存储K-V键值对，通过`红黑树`实现；天然支持排序，默认情况下通过Key值的自然顺序进行排序；
@@ -418,8 +456,76 @@ Java IO的各种流是阻塞的。这意味着，当一个线程调用read() 或
 Java NIO 提供 Selector 实现单个线程管理多个channel的功能。 
 ![](pic/nio.png)
 
-## 泛型实现
-泛型是通过`类型擦除`来实现的，编译器在编译时擦除了所有类型相关的信息，所以在运行时不存在任何类型相关的信息List\<String>不能转为List\<Object>，因为泛型的类型不一样，这种转换只能在`子类与父类`之间转换，虽然Object是String的父类，但是List\<Object>和List\<String>在编译器看来，是两种完全不同的东西
+## 泛型
+#### 泛型方法
+```java
+class GenericMethod{
+ public <T> T[] sort(T[] elements){
+  return elements;
+ }
+}
+```
+#### 泛型类
+子类继承泛型类时或者实例化泛型类的对象时，需要指定具体的参数类型或者声明一个参数变量。
+```java
+class GenericClass<ID, T>{}
+ 
+class SubGenericClass<T> extends GenericClass<Integer, T>{}
+```
+#### 泛型接口
+子类在实现泛型接口时需要填入具体的数据类型或者填入子类声明的类型变量。
+```java
+interface GenericInterface<T> {
+ T append(T seg);
+}
+```
+#### 实现
+泛型是通过`类型擦除`来实现的，编译器在`编译后`擦除了所有类型相关的信息，泛型信息对 Java 编译器可以见，对 Java 虚拟机不可见。所以在运行时不存在任何类型相关的信息List\<String>不能转为List\<Object>，因为泛型的类型不一样，这种转换只能在`子类与父类`之间转换，虽然Object是String的父类，但是List\<Object>和List\<String>在编译器看来，是两种完全不同的东西
+Java 编译器通过如下方式实现擦除：
+- 用 Object 或者界定类型替代泛型，产生的字节码中只包含了原始的类，接口和方法；
+- 在恰当的位置插入`强制转换`代码来确保类型安全；
+- 在继承了泛型类或接口的类中插入`桥接`方法来保留多态性。
+#### 示例
+定义 User 类，实现了 Comparable 接口，类型参数填入 User，实现 compareTo 方法。
+```java
+class User implements Comparable<User> {
+ String name;
+     
+ public int compareTo(User other){
+  return this.name.compareTo(other.name);
+ }
+}
+```
+JDK 中 Comparable 接口源码内容如下：
+```java
+public interface Comparable<T>{
+ int compareTo(T o);
+}
+```
+反编译出来的内容放在 Comparable.jad 文件中，文件内容如下：
+```java
+public interface Comparable
+{
+ public abstract int compareTo(Object obj);
+}
+```
+反编译之后的内容中已经没有了类型变量 T 。compareTo 方法中的参数类型 T 也被替换成了 Object。
+User.jad 文件内容如下：
+```java
+class User implements Comparable{
+ User(){}
+ public int compareTo(User user){
+  return name.compareTo(user.name);
+ }
+ // 桥接方法
+ public volatile int compareTo(Object obj){
+  return compareTo((User)obj);
+ }
+ String name;
+}
+```
+类型参数没有了，多了一个无参构造方法，多了一个 compareTo(Object obj) 方法，这个就是桥接方法，还可以发现参数 obj 被强转成 User 再传入 compareTo(User user) 方法
+
 
 ## Lambda
 一个接口如果只包含`一个`抽象方法，那么它就是一个`函数式接口`
@@ -742,6 +848,12 @@ jdk内部类用`引导类加载器`加载，调SPI接口的方法依赖外部JAR
 ![](pic/context.png)
 - ContextClassLoader默认为`AppClassLoader`
 - 子线程ContextClassLoader默认为父线程的ContextClassLoader
+
+## 内存泄漏
+1. **静态集合类**，如HashMap、LinkedList等等。如果这些容器为静态的，那么它们的生命周期与程序一致，则容器中的对象在程序结束之前将不能被释放，从而造成内存泄漏。简单而言，长生命周期的对象持有短生命周期对象的引用，尽管短生命周期的对象不再使用，但是因为长生命周期对象持有它的引用而导致不能被回收。
+2. **单例模式**，和静态集合导致内存泄漏原因类似，因为单例的静态特性，它的生命周期和 JVM 的生命周期一样长，所以如果单例对象持有外部对象引用，那么这个外部对象也不会被回收，那么就会发生内存泄漏。要注意！！！！单例对象如果持有Context，那么很容易引发内存泄漏，此时需要注意传递给单例对象的Context最好是Application Context。
+3. **未关闭的资源类**：如数据库连接、网络连接和IO连接等。在对数据库进行操作的过程中，首先需要建立与数据库的连接，当不再使用时，需要调用close方法来释放与数据库的连接。只有连接被关闭后，垃圾回收器才会回收对应的对象。否则，如果在访问数据库的过程中，对Connection、Statement或ResultSet不显性地关闭，将会造成大量的对象无法被回收，从而引起内存泄漏。
+4. **变量不合理的作用域**。一般而言，一个变量的定义的作用范围大于其使用范围，很有可能会造成内存泄漏。另一方面，如果没有及时地把对象设置为null，很有可能导致内存泄漏的发生。
 
 ## JDK1.8新特性
 1. Lamdba表达式
