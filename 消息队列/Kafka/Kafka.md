@@ -219,16 +219,21 @@ try {
 }
 ```
 #### 数据有序
-单分区内有序，分区之间无序
-1. kafka在1.x版本之前保证数据单分区有序，条件如下：
+单partition有序，partition之间无序
+1. kafka在1.x版本之前保证数据单partition有序，条件如下：
 max.in.flight.requests.per.connection=1（不需要考虑是否开启幂等性）。
-2. kafka在1.x及以后版本保证数据单分区有序，条件如下：
+2. kafka在1.x及以后版本保证数据单partition有序，条件如下：
    - 开启幂等性
     max.in.flight.requests.per.connection需要设置小于等于5。
    - 未开启幂等性
     max.in.flight.requests.per.connection需要设置为1。
 
 原因说明：因为在kafka1.x以后，启用幂等后，kafka服务端会缓存producer发来的最近5个request的元数据，故无论如何，都可以保证最近5个request的数据都是有序的。
+
+如果要保证数据消费顺序：
+1. 1个Topic（主题）只创建1个Partition(分区)，这样生产者的所有数据都发送到了一个Partition(分区)，保证了消息的消费顺序。
+2. 生产者在发送消息的时候指定要发送到哪个Partition(分区)。
+
 
 ## Zookeeper保存的Kafka信息
 1. /kafka/brokers/ids `[0,1,2]` 记录有哪些服务器
@@ -291,6 +296,17 @@ KAFKA transactional api 的调用顺序：
 - transaction log 有多个分区，每个分区都有一个 leader，该 leade对应哪个 kafka broker，则那个 broker上的 transaction coordinator 就负责对这些分区的写操作；
 - transaction coordinator 是唯一负责读写 transaction log 的组件，如果某个 kafka broker 宕机的话，其负责的 transaction log 的 partitions 就没有了对应的 leader，此时会通过选举机制选举出一个新的 coordinator，该 coordinator 会从这些 transaction log partitions 在其它节点的副本中恢复状态数据；
 - 正是由于 transaction log 是 kakfa 的一个内部 topic, 所以 KAFKA 可以通过内部的复制协议和选举机制（replication protocol and leader election processes)，来确保对事务状态 transaction state 的持久化存储，以及对 transaction coordinator 的容错。
+
+## Kafka避免重复消费
+#### 为什么会出现重复消费
+1. kafka是通过`offset`来标记消费的。默认情况下，消费完成后会自动提交offset，避免重复消费。Kafka消费端的自动提交逻辑有一个默认的5秒间隔，也就是说在5秒之后的下一次向Broker拉取消息的时候提交。所以在Consumer消费的过程中，应用程序被强制`kill掉`或者`宕机`，可能会导致Offset没提交，从而产生重复提交的问题。
+2. Kafka里面有一个Partition Balance机制，就是把多个Partition均衡的分配给多个消费者。Consumer端会从分配的Partition里面去消费消息，如果Consumer在默认的5分钟内没办法处理完这一批消息。就会触发Kafka的`Rebalance`机制，从而导致Offset自动提交失败。而在重新Rebalance之后，Consumer还是会从`之前`没提交的Offset位置开始消费，也会导致消息重复消费的问题。
+#### 如何避免
+1. 提高消费端的处理性能避免触发Rebalance，比如可以用异步的方式来处理消息，缩短单个消息消费的时长。或者还可以调整消息处理的`超时时间`。还可以减少一次性从Broker上拉取数据的条数。
+2. 可以针对消息生成`md5`然后保存到mysql或者redis里面，在处理消息之前先去mysql或者redis里面`判断`是否已经消费过。这个方案其实就是利用幂等性的思想。
+
+## Kafka保证数据有序
+
 
 ## Kafka优缺点
 #### 优点
