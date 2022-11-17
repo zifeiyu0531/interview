@@ -900,3 +900,17 @@ public class RestFulController {
     }
 }
 ```
+
+## Spring中的设计模式
+**工厂模式**
+实现方式：`BeanFactory`。Spring中的BeanFactory就是简单工厂模式的体现，根据传入一个唯一的标识来获得Bean对象，但是否是在传入参数后创建还是传入参数前创建这个要根据具体情况来定。
+**单例模式**
+Spring依赖注入`Bean实例`默认是单例的
+**适配器模式**
+SpringMVC中的适配器`HandlerAdatper`
+**装饰器模式**
+Spring中用到的包装器模式在类名上有两种表现：一种是类名中含有`Wrapper`，另一种是类名中含有`Decorator`。
+**代理模式**
+AOP底层，就是动态代理模式的实现
+**观察者模式**
+Spring的`事件驱动模型`使用的是观察者模式 ，Spring中Observer模式常用的地方是`listener`的实现。
